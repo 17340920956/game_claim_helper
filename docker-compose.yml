@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=mysql+pymysql://root:password@db:3306/epic_games
+      - REDIS_URL=redis://redis:6379/0
+      - EPIC_FREE_GAMES_URL=https://store.epicgames.com/en-US/free-games
+      - WECHAT_CORP_ID=${WECHAT_CORP_ID}
+      - WECHAT_AGENT_ID=${WECHAT_AGENT_ID}
+      - WECHAT_SECRET=${WECHAT_SECRET}
+      - QQ_BOT_API_URL=${QQ_BOT_API_URL}
+      - QQ_BOT_TOKEN=${QQ_BOT_TOKEN}
+      - SCHEDULER_TIMEZONE=Asia/Shanghai
+    depends_on:
+      - db
+      - redis
+    restart: unless-stopped
+
+  db:
+    image: mysql:8.0
+    environment:
+      - MYSQL_ROOT_PASSWORD=password
+      - MYSQL_DATABASE=epic_games
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+  redis_data:

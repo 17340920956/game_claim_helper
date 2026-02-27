@@ -13,37 +13,3 @@ python-dotenv==1.0.0
 cryptography==42.0.0
 wechatpy==1.8.18
 xmltodict==0.13.0
-
-game_claim_helper/
-├── config/                 # [配置中心] 所有环境与应用配置
-│   ├── app.py              # 基础应用配置（如时区）
-│   ├── database.py         # MySQL 和 Redis 连接配置
-│   ├── epic.py             # Epic 爬虫相关配置
-│   ├── qq.py               # QQ 机器人配置
-│   └── wechat.py           # 微信公众号配置
-│
-├── core/                   # [核心组件] 基础设施代码
-│   └── scheduler.py        # APScheduler 定时任务调度器
-│
-├── db/                     # [数据持久层] 数据库交互
-│   ├── connection.py       # SQLAlchemy 数据库连接会话
-│   ├── models.py           # ORM 数据模型 (User, PushLog)
-│   ├── redis.py            # Redis 客户端封装
-│   └── schemas.py          # Pydantic 数据校验模型 (用于 API)
-│
-├── services/               # [业务逻辑层] 核心功能实现
-│   ├── game/               # 游戏相关服务
-│   │   └── scraper.py      # Epic 免费游戏爬虫逻辑
-│   └── notification/       # 消息推送服务
-│       ├── base.py         # 推送器抽象基类
-│       ├── service.py      # 统一推送服务入口 (Facade 模式)
-│       ├── qq/             # QQ 推送实现
-│       └── wechat/         # 微信公众号推送实现
-│
-├── routers/                # [接口路由层] Web API 路由
-│   └── wechat.py           # 微信公众号回调接口 (验证/接收消息)
-│
-├── main.py                 # [应用入口] FastAPI 应用启动文件
-├── docker-compose.yml      # Docker 容器编排配置
-├── Dockerfile              # Docker 镜像构建文件
-└── requirements.txt        # Python 依赖清单

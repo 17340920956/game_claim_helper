@@ -8,14 +8,13 @@ from config import get_settings
 
 settings = get_settings()
 
-
 class EpicScraper:
     def __init__(self):
         self.base_url = settings.EPIC_FREE_GAMES_URL
         self.api_url = "https://store-site-backend-static.ak.epicgames.com/freeGamesPromotions"
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept-Language": "en-US,en;q=0.9",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept-Language": "zh-CN,zh;q=0.9",
         }
     
     def _parse_date(self, date_str: Optional[str]) -> Optional[str]:
@@ -51,17 +50,63 @@ class EpicScraper:
     
     def _parse_game(self, game_data: Dict[str, Any]) -> Dict[str, Any]:
         title = game_data.get("title", "Unknown")
-        slug = game_data.get("productSlug", game_data.get("urlSlug", title.lower().replace(" ", "-")))
-        if slug:
-            slug = slug.split("/")[0]
+        # 修复逻辑：优先使用 productSlug，如果包含 '/' 则不分割，因为有些 slug 可能是带层级的
+        # 但 Epic URL 通常是 p/slug，所以我们尽量获取纯净的 slug
         
-        url = f"https://store.epicgames.com/en-US/p/{slug}" if slug else ""
+        # 尝试获取自定义属性中的 slug
+        custom_attributes = game_data.get("customAttributes", [])
+        page_slug = None
+        for attr in custom_attributes:
+            if attr.get("key") == "com.epicgames.app.productSlug":
+                page_slug = attr.get("value")
+                break
+        
+        if not page_slug:
+            # 尝试从 mapping 或 offerMappings 中获取
+            for mapping in game_data.get("offerMappings", []):
+                if mapping.get("pageSlug"):
+                    page_slug = mapping.get("pageSlug")
+                    break
+                    
+        if not page_slug:
+            # 尝试从 catalogNs.mappings 中获取 (如果有这种结构)
+            mappings = game_data.get("catalogNs", {}).get("mappings", [])
+            for mapping in mappings:
+                if mapping.get("pageSlug"):
+                    page_slug = mapping.get("pageSlug")
+                    break
+
+        if not page_slug:
+            page_slug = game_data.get("productSlug") or game_data.get("urlSlug")
+        
+        if not page_slug and title:
+            page_slug = title.lower().replace(" ", "-")
+            
+        if page_slug and "/" in page_slug:
+             # 有些特殊的 slug 可能包含路径，保留或者处理视情况而定
+             # 通常只要第一部分
+             if page_slug.endswith("/home"):
+                 page_slug = page_slug.replace("/home", "")
+        
+        url = f"https://store.epicgames.com/zh-CN/p/{page_slug}" if page_slug else ""
         
         image_url = ""
+        # 优先寻找 Tall 类型的图片（竖图），其次是 Thumbnail
         for image in game_data.get("keyImages", []):
-            if image.get("type") in ["Thumbnail", "OfferImageWide", "DieselStoreFrontWide"]:
+            if image.get("type") == "OfferImageTall":
                 image_url = image.get("url", "")
                 break
+        
+        if not image_url:
+            for image in game_data.get("keyImages", []):
+                # 增加更多图片类型匹配
+                if image.get("type") in ["Thumbnail", "OfferImageWide", "DieselStoreFrontWide", "VaultClosed"]:
+                    image_url = image.get("url", "")
+                    break
+        
+        # 如果还是没有图片，尝试任意一张
+        if not image_url and game_data.get("keyImages"):
+             image_url = game_data.get("keyImages")[0].get("url", "")
         
         promotion = game_data.get("promotions", {})
         
@@ -85,7 +130,7 @@ class EpicScraper:
         
         return {
             "title": title,
-            "slug": slug,
+            "slug": page_slug,
             "url": url,
             "start_date": start_date,
             "end_date": end_date,
@@ -98,9 +143,9 @@ class EpicScraper:
         
         try:
             params = {
-                "locale": "en-US",
-                "country": "US",
-                "allowCountries": "US",
+                "locale": "zh-CN",
+                "country": "CN",
+                "allowCountries": "CN",
             }
             
             response = requests.get(
@@ -160,7 +205,7 @@ scraper = EpicScraper()
 
 
 def fetch_and_store_games():
-    from redis_client import redis_client
+    from db.redis import redis_client
     
     print("开始爬取Epic免费游戏...")
     games = scraper.fetch_free_games()

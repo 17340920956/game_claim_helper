@@ -9,11 +9,14 @@ services:
       - DATABASE_URL=mysql+pymysql://admin:Yang1024%40q@db:3306/game_claim_helper
       - REDIS_URL=redis://admin:ecommerce_pwd@redis:6379/0
       - EPIC_FREE_GAMES_URL=https://store.epicgames.com/en-US/free-games
-      - WECHAT_CORP_ID=${WECHAT_CORP_ID}
-      - WECHAT_AGENT_ID=${WECHAT_AGENT_ID}
-      - WECHAT_SECRET=${WECHAT_SECRET}
-      - QQ_BOT_API_URL=${QQ_BOT_API_URL}
-      - QQ_BOT_TOKEN=${QQ_BOT_TOKEN}
+      - WECHAT_OFFICIAL_APPID=${WECHAT_OFFICIAL_APPID}
+      - WECHAT_OFFICIAL_SECRET=${WECHAT_OFFICIAL_SECRET}
+      - WECHAT_OFFICIAL_TOKEN=${WECHAT_OFFICIAL_TOKEN}
+      - WECHAT_OFFICIAL_AES_KEY=${WECHAT_OFFICIAL_AES_KEY}
+      - SMTP_SERVER=${SMTP_SERVER}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
       - SCHEDULER_TIMEZONE=Asia/Shanghai
     depends_on:
       - db

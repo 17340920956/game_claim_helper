@@ -4,8 +4,8 @@
 CREATE TABLE IF NOT EXISTS `users` (
   `id` INT NOT NULL AUTO_INCREMENT,
   `epic_account` VARCHAR(100) NOT NULL COMMENT 'Epic Games Account',
-  `contact_type` ENUM('wechat', 'qq') NOT NULL COMMENT 'Contact Type',
-  `contact_id` VARCHAR(50) NOT NULL COMMENT 'Contact ID (WeChat ID or QQ Number)',
+  `contact_type` ENUM('wechat_official', 'qq') NOT NULL COMMENT 'Contact Type',
+  `contact_id` VARCHAR(50) NOT NULL COMMENT 'Contact ID (WeChat OpenID or QQ Number)',
   `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT 'Creation Time',
   PRIMARY KEY (`id`),
   INDEX `ix_users_id` (`id`)
@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS `push_logs` (
   `user_id` INT NOT NULL COMMENT 'User ID',
   `game_slug` VARCHAR(100) NOT NULL COMMENT 'Game Slug',
   `game_title` VARCHAR(100) NOT NULL COMMENT 'Game Title',
-  `contact_type` ENUM('wechat', 'qq') NOT NULL COMMENT 'Contact Type',
+  `contact_type` ENUM('wechat_official', 'qq') NOT NULL COMMENT 'Contact Type',
   `contact_id` VARCHAR(50) NOT NULL COMMENT 'Contact ID',
   `status` ENUM('success', 'failed') NOT NULL COMMENT 'Push Status',
   `message` TEXT COMMENT 'Push Message',

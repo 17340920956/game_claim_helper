@@ -2,6 +2,11 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from datetime import datetime
 from config import get_settings
+from services.game.scraper import fetch_and_store_games
+from services.notification.service import push_service
+from db.models import User, PushLog, PushStatus
+from db.connection import SessionLocal
+from db.redis import redis_client
 
 settings = get_settings()
 
@@ -9,8 +14,6 @@ scheduler = BackgroundScheduler(timezone=settings.SCHEDULER_TIMEZONE)
 
 
 def scrape_current_week_games():
-    from scraper import fetch_and_store_games
-    from redis_client import redis_client
     
     print(f"[{datetime.now()}] 开始爬取本周免费游戏...")
     redis_client.clear_week_data(is_next_week=False)
@@ -19,8 +22,6 @@ def scrape_current_week_games():
 
 
 def scrape_next_week_games():
-    from scraper import fetch_and_store_games
-    from redis_client import redis_client
     
     print(f"[{datetime.now()}] 开始爬取下周预告游戏...")
     redis_client.clear_week_data(is_next_week=True)
@@ -29,10 +30,6 @@ def scrape_next_week_games():
 
 
 def push_current_week_notifications():
-    from database import SessionLocal
-    from models import User, PushLog, PushStatus
-    from redis_client import redis_client
-    from push_service import push_service
     
     print(f"[{datetime.now()}] 开始推送本周游戏通知...")
     
@@ -88,10 +85,6 @@ def push_current_week_notifications():
 
 
 def push_next_week_notifications():
-    from database import SessionLocal
-    from models import User, PushLog, PushStatus
-    from redis_client import redis_client
-    from push_service import push_service
     
     print(f"[{datetime.now()}] 开始推送下周预告通知...")
     
@@ -147,9 +140,6 @@ def push_next_week_notifications():
 
 
 def retry_failed_pushes():
-    from database import SessionLocal
-    from models import PushLog, PushStatus
-    from push_service import push_service
     
     print(f"[{datetime.now()}] 开始重试失败的推送...")
     
@@ -183,54 +173,46 @@ def retry_failed_pushes():
         db.close()
 
 
-def setup_scheduler():
+def start_scheduler():
+    scheduler = BackgroundScheduler(timezone=settings.SCHEDULER_TIMEZONE)
+    
+    # 每周四晚上 23:05 爬取本周免费游戏 (Epic通常在周四23:00更新)
     scheduler.add_job(
         scrape_current_week_games,
-        CronTrigger(day_of_week="tue", hour=0, minute=0),
-        id="scrape_current_week",
-        name="爬取本周免费游戏",
-        replace_existing=True
+        CronTrigger(day_of_week='thu', hour=23, minute=5),
+        id='scrape_current_week'
     )
     
+    # 每周四晚上 23:05 爬取下周预告游戏
     scheduler.add_job(
         scrape_next_week_games,
-        CronTrigger(day_of_week="fri", hour=0, minute=0),
-        id="scrape_next_week",
-        name="爬取下周预告游戏",
-        replace_existing=True
+        CronTrigger(day_of_week='thu', hour=23, minute=5),
+        id='scrape_next_week'
     )
     
+    # 每周五早上 09:00 推送本周游戏通知
     scheduler.add_job(
         push_current_week_notifications,
-        CronTrigger(day_of_week="wed", hour=10, minute=0),
-        id="push_current_week",
-        name="推送本周游戏通知",
-        replace_existing=True
+        CronTrigger(day_of_week='fri', hour=9, minute=0),
+        id='push_current_week'
     )
     
+    # 每周五早上 09:30 推送下周预告通知
     scheduler.add_job(
         push_next_week_notifications,
-        CronTrigger(day_of_week="sat", hour=10, minute=0),
-        id="push_next_week",
-        name="推送下周预告通知",
-        replace_existing=True
+        CronTrigger(day_of_week='fri', hour=9, minute=30),
+        id='push_next_week'
     )
     
+    # 每天重试失败的推送
     scheduler.add_job(
         retry_failed_pushes,
-        CronTrigger(hour=12, minute=0),
-        id="retry_failed",
-        name="重试失败的推送",
-        replace_existing=True
+        CronTrigger(hour='10-22', minute=0),  # 每天10点到22点的整点重试
+        id='retry_failed_pushes'
     )
     
-    return scheduler
-
-
-def start_scheduler():
-    setup_scheduler()
     scheduler.start()
-    print("定时任务调度器已启动")
+    print(f"[{datetime.now()}] 调度器已启动")
 
 
 if __name__ == "__main__":

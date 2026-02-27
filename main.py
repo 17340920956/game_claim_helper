@@ -5,18 +5,18 @@ from typing import List
 from datetime import datetime
 from contextlib import asynccontextmanager
 
-from database import get_db
-from models import User, PushLog, ContactType, PushStatus, ConfirmationStatus
-from schemas import (
+from db.connection import get_db
+from db.models import User, PushLog, ContactType, PushStatus, ConfirmationStatus
+from db.schemas import (
     UserCreate, UserResponse, 
     GameInfo, PushLogResponse,
     ConfirmationRequest, PushRequest
 )
-from redis_client import redis_client
-from push_service import push_service
-from scraper import fetch_and_store_games
-from scheduler import start_scheduler
-
+from db.redis import redis_client
+from services.notification.service import push_service
+from services.game.scraper import fetch_and_store_games
+from core.scheduler import start_scheduler
+from routers.wechat import router as wechat_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -26,7 +26,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Epic免费游戏推送系统",
-    description="自动爬取Epic免费游戏并推送到微信/QQ",
+    description="自动爬取Epic免费游戏并推送到微信公众号/QQ",
     version="1.0.0",
     lifespan=lifespan
 )
@@ -39,6 +39,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(wechat_router)
 
 @app.get("/games/current", response_model=List[GameInfo])
 def get_current_games():

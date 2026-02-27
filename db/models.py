@@ -1,11 +1,11 @@
 from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean, Enum as SQLEnum
 from sqlalchemy.sql import func
-from database import Base
+from db.connection import Base
 import enum
 
 
 class ContactType(enum.Enum):
-    wechat = "wechat"
+    wechat_official = "wechat_official"
     qq = "qq"
 
 

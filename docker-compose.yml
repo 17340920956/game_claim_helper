@@ -6,8 +6,8 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=mysql+pymysql://root:password@db:3306/epic_games
-      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=mysql+pymysql://admin:Yang1024%40q@db:3306/game_claim_helper
+      - REDIS_URL=redis://admin:ecommerce_pwd@redis:6379/0
       - EPIC_FREE_GAMES_URL=https://store.epicgames.com/en-US/free-games
       - WECHAT_CORP_ID=${WECHAT_CORP_ID}
       - WECHAT_AGENT_ID=${WECHAT_AGENT_ID}
@@ -24,7 +24,9 @@ services:
     image: mysql:8.0
     environment:
       - MYSQL_ROOT_PASSWORD=password
-      - MYSQL_DATABASE=epic_games
+      - MYSQL_DATABASE=game_claim_helper
+      - MYSQL_USER=admin
+      - MYSQL_PASSWORD=Yang1024@q
     ports:
       - "3306:3306"
     volumes:

@@ -13,10 +13,8 @@ services:
       - WECHAT_OFFICIAL_SECRET=${WECHAT_OFFICIAL_SECRET}
       - WECHAT_OFFICIAL_TOKEN=${WECHAT_OFFICIAL_TOKEN}
       - WECHAT_OFFICIAL_AES_KEY=${WECHAT_OFFICIAL_AES_KEY}
-      - SMTP_SERVER=${SMTP_SERVER}
-      - SMTP_PORT=${SMTP_PORT}
-      - SMTP_USER=${SMTP_USER}
-      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - QQ_BOT_API_URL=${QQ_BOT_API_URL}
+      - QQ_BOT_TOKEN=${QQ_BOT_TOKEN}
       - SCHEDULER_TIMEZONE=Asia/Shanghai
     depends_on:
       - db
@@ -35,6 +33,7 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
     restart: unless-stopped
+    command: --default-authentication-plugin=mysql_native_password
 
   redis:
     image: redis:7-alpine
@@ -43,6 +42,7 @@ services:
     volumes:
       - redis_data:/data
     restart: unless-stopped
+    command: redis-server --requirepass ecommerce_pwd
 
 volumes:
   mysql_data:

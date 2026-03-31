@@ -1,5 +1,7 @@
-from fastapi import APIRouter, Query, Request, Depends, Response
+from fastapi import APIRouter, Query, Request, Depends, Response, HTTPException
+from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
+import os
 from app.db.session import get_db
 from app.security.wechat.wechat_security import WeChatSecurity
 from app.services.wechat.message_handler import WeChatService
@@ -7,6 +9,23 @@ from wechatpy import parse_message
 from app.core.logger import logger
 
 router = APIRouter()
+
+
+@router.get("/wechat/callback/{filename}")
+async def serve_wechat_verify_file_from_callback(filename: str):
+    """
+    微信公众号域名归属权验证文件服务（支持 /wechat/callback/ 路径）
+    自动匹配以 MP_verify_ 开头的 .txt 文件
+    """
+    if filename.startswith("MP_verify_") and filename.endswith(".txt"):
+        # 尝试从项目根目录读取验证文件
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        file_path = os.path.join(base_dir, filename)
+        if os.path.exists(file_path):
+            with open(file_path, 'r') as f:
+                content = f.read()
+            return PlainTextResponse(content)
+    raise HTTPException(status_code=404, detail="Not Found")
 
 @router.get("/wechat/callback")
 async def wechat_verify(

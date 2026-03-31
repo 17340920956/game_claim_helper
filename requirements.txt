@@ -16,3 +16,4 @@ xmltodict==0.13.0
 gunicorn==21.2.0
 build==1.0.3
 pyjwt==2.8.0
+loguru==0.7.2

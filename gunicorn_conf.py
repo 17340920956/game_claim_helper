@@ -3,8 +3,8 @@ import multiprocessing
 # 绑定的IP和端口
 bind = "0.0.0.0:8000"
 
-# 工作进程数 (建议 CPU核心数 * 2 + 1)
-workers = multiprocessing.cpu_count() * 2 + 1
+# 工作进程数 (设为 1 以避免 APScheduler 定时任务重复执行)
+workers = 1
 
 # 指定 worker 类型为 uvicorn
 worker_class = "uvicorn.workers.UvicornWorker"

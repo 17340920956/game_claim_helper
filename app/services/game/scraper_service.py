@@ -27,13 +27,17 @@ class EpicScraper:
     
     def _parse_date(self, date_str: Optional[str]) -> Optional[datetime]:
         """
-        解析日期字符串，转换为本地时间格式
+        解析日期字符串，转换为 UTC aware datetime
         Epic API 返回的是 UTC 时间 (ISO 8601)
         """
         if not date_str:
             return None
         try:
             dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+            # 确保返回 UTC 时区的 datetime
+            if dt.tzinfo is None:
+                from datetime import timezone
+                dt = dt.replace(tzinfo=timezone.utc)
             return dt
         except (ValueError, AttributeError):
             return None
@@ -77,6 +81,8 @@ class EpicScraper:
         # 尝试获取 slug 逻辑保持不变...
         custom_attributes = game_data.get("customAttributes", [])
         page_slug = None
+        offer_id = game_data.get("id", "")
+        namespace = game_data.get("catalogNs", {}).get("mappings", [{}])[0].get("namespace", "") or game_data.get("namespace", "")
         for attr in custom_attributes:
             if attr.get("key") == "com.epicgames.app.productSlug":
                 page_slug = attr.get("value")
@@ -148,7 +154,9 @@ class EpicScraper:
             "start_time": start_date,
             "end_time": end_date,
             "image_url": image_url,
-            "note": page_slug 
+            "offer_id": offer_id,
+            "namespace": namespace,
+            "note": page_slug
         }
     
     def fetch_free_games(self) -> Dict[str, List[Dict[str, Any]]]:
@@ -222,8 +230,9 @@ def fetch_and_store_games():
                 stored_games.append(new_game)
                 logger.info(f"新增本周免费游戏: {new_game.name}")
             else:
-                # TODO: 更新逻辑
-                pass
+                # 更新已有游戏的时间、图片等信息
+                repo.update_game(existing_game, game_data)
+                logger.info(f"更新本周免费游戏: {existing_game.name}")
         
         # 处理下周预告游戏
         for game_data in games["upcoming"]:
@@ -237,7 +246,8 @@ def fetch_and_store_games():
                 stored_games.append(new_game)
                 logger.info(f"新增下周预告游戏: {new_game.name}")
             else:
-                pass
+                repo.update_game(existing_game, game_data)
+                logger.info(f"更新下周预告游戏: {existing_game.name}")
                 
     except Exception as e:
         logger.error(f"存储游戏数据失败: {e}")

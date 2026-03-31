@@ -1,4 +1,4 @@
-from wechatpy.utils import check_signature
+ from wechatpy.utils import check_signature
 from wechatpy.crypto import WeChatCrypto
 from wechatpy.exceptions import InvalidSignatureException
 from fastapi import HTTPException

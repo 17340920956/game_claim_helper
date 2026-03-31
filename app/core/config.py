@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     全局配置聚合类
     """
     # Database
-    DATABASE_URL: str = "mysql+pymysql://gch:Gch1024!@42.194.176.11:3306/game_claim_helper"
+    DATABASE_URL: str = "mysql+pymysql://root:password@localhost:3306/game_claim_helper"
     REDIS_URL: str = "redis://localhost:6379/0"
 
     # Epic

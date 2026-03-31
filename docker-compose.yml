@@ -2,48 +2,26 @@ version: '3.8'
 
 services:
   app:
+    # 如果要使用 Docker Hub 镜像，请取消注释下一行并注释 build: .
+    # image: your_dockerhub_username/game_claim_helper:latest
     build: .
+    container_name: game_claim_helper
     ports:
       - "8000:8000"
+    env_file:
+      - .env
     environment:
-      - DATABASE_URL=mysql+pymysql://admin:Yang1024%40q@db:3306/game_claim_helper
-      - REDIS_URL=redis://admin:ecommerce_pwd@redis:6379/0
-      - EPIC_FREE_GAMES_URL=https://store.epicgames.com/en-US/free-games
+      # 数据库连接字符串示例 (请在 .env 中配置)
+      # DATABASE_URL=mysql+pymysql://user:password@host:port/dbname
+      # REDIS_URL=redis://:password@host:port/db
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - EPIC_FREE_GAMES_URL=${EPIC_FREE_GAMES_URL}
       - WECHAT_OFFICIAL_APPID=${WECHAT_OFFICIAL_APPID}
       - WECHAT_OFFICIAL_SECRET=${WECHAT_OFFICIAL_SECRET}
       - WECHAT_OFFICIAL_TOKEN=${WECHAT_OFFICIAL_TOKEN}
       - WECHAT_OFFICIAL_AES_KEY=${WECHAT_OFFICIAL_AES_KEY}
       - QQ_BOT_API_URL=${QQ_BOT_API_URL}
       - QQ_BOT_TOKEN=${QQ_BOT_TOKEN}
-      - SCHEDULER_TIMEZONE=Asia/Shanghai
-    depends_on:
-      - db
-      - redis
+      - SCHEDULER_TIMEZONE=${SCHEDULER_TIMEZONE:-Asia/Shanghai}
     restart: unless-stopped
-
-  db:
-    image: mysql:8.0
-    environment:
-      - MYSQL_ROOT_PASSWORD=password
-      - MYSQL_DATABASE=game_claim_helper
-      - MYSQL_USER=admin
-      - MYSQL_PASSWORD=Yang1024@q
-    ports:
-      - "3306:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-    restart: unless-stopped
-    command: --default-authentication-plugin=mysql_native_password
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    restart: unless-stopped
-    command: redis-server --requirepass ecommerce_pwd
-
-volumes:
-  mysql_data:
-  redis_data:

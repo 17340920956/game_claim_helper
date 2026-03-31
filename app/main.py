@@ -37,9 +37,9 @@ app = FastAPI(
 # 配置 CORS 中间件
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://yxbot.online", "http://localhost:8000"],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
 

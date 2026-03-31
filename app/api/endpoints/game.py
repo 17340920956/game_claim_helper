@@ -6,7 +6,6 @@ from app.repositories.game.game_repository import GameRepository
 from app.services.game.scraper_service import fetch_and_store_games
 from app.services.game.claim_service import epic_claim_service
 from app.schemas.game import GameResponse, GameListResponse
-from app.schemas.user import UserResponse
 from app.core.security import verify_admin_access
 from app.core.logger import logger
 from datetime import datetime

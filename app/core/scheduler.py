@@ -3,9 +3,9 @@ from apscheduler.triggers.cron import CronTrigger
 from app.core.config import get_settings
 from app.services.game.scraper_service import fetch_and_store_games
 from app.services.notification.notification_service import push_service
-from app.models.base import User, PushLog, FreeGame
+from app.models.base import User, PushLog
 from app.db.session import SessionLocal
-from app.repositories.game.game_repository import GameRepository
+from app.db.redis import redis_client
 from app.repositories.user.user_repository import UserRepository
 from app.repositories.notification.push_log_repository import PushLogRepository
 from app.schemas.base import PushLogCreate
@@ -50,11 +50,15 @@ def _push_games_to_users(is_next_week: bool):
     db = SessionLocal()
     try:
         user_repo = UserRepository(db)
-        game_repo = GameRepository(db)
         log_repo = PushLogRepository(db)
 
         users = user_repo.get_all_users()
-        games = game_repo.get_upcoming_games() if is_next_week else game_repo.get_active_games()
+        
+        # 从 Redis 获取游戏数据
+        if is_next_week:
+            games = redis_client.get_next_week_games()
+        else:
+            games = redis_client.get_current_week_games()
 
         if not games:
             logger.warning(f"没有{'下周预告' if is_next_week else '本周'}免费游戏")
@@ -64,7 +68,9 @@ def _push_games_to_users(is_next_week: bool):
         for user in users:
             games_to_push = []
             for game in games:
-                if log_repo.has_user_been_notified(user.id, game.id):
+                # 使用 game slug 或 name 作为唯一标识
+                game_slug = game.get('note') or game.get('name')
+                if log_repo.has_user_been_notified(user.id, game_slug, is_next_week):
                     continue
                 games_to_push.append(game)
 
@@ -79,7 +85,8 @@ def _push_games_to_users(is_next_week: bool):
                     result = push_service.push_game_notification(user=user, game=game, is_next_week=False)
                     log_data = PushLogCreate(
                         user_id=user.id,
-                        game_id=game.id,
+                        game_name=game.get('name', '未知'),
+                        game_slug=game.get('note') or game.get('name'),
                         status=result["success"],
                         is_next_week=False,
                         note=result.get("error")
@@ -89,10 +96,12 @@ def _push_games_to_users(is_next_week: bool):
                         pushed_count += 1
                 continue
 
+            # 下周预告批量推送后的日志记录
             for game in games_to_push:
                 log_data = PushLogCreate(
                     user_id=user.id,
-                    game_id=game.id,
+                    game_name=game.get('name', '未知'),
+                    game_slug=game.get('note') or game.get('name'),
                     status=result["success"],
                     is_next_week=True,
                     note=result.get("error")
@@ -120,7 +129,21 @@ def retry_failed_pushes():
         retry_count = 0
         skipped = 0
         for log in failed_logs:
-            if not log.user or not log.game:
+            if not log.user:
+                continue
+
+            # 从 Redis 获取游戏数据
+            is_next_week = log.is_next_week or False
+            games = redis_client.get_next_week_games() if is_next_week else redis_client.get_current_week_games()
+            
+            # 根据游戏名称或 slug 查找对应游戏
+            game_data = None
+            for game in games:
+                if game.get('name') == log.game_name or game.get('note') == log.game_slug:
+                    game_data = game
+                    break
+            
+            if not game_data:
                 continue
 
             # 限制重试次数，通过 note 中的标记计算
@@ -137,10 +160,9 @@ def retry_failed_pushes():
                 skipped += 1
                 continue
 
-            is_next_week = log.is_next_week or False
             result = push_service.push_game_notification(
                 user=log.user,
-                game=log.game,
+                game=game_data,
                 is_next_week=is_next_week
             )
 

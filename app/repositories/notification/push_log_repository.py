@@ -19,9 +19,10 @@ class PushLogRepository:
     def get_user_logs(self, user_id: int):
         return self.db.query(PushLog).filter(PushLog.user_id == user_id).order_by(PushLog.push_time.desc()).all()
 
-    def has_user_been_notified(self, user_id: int, game_id: int) -> bool:
+    def has_user_been_notified(self, user_id: int, game_slug: str, is_next_week: bool = False) -> bool:
         return self.db.query(PushLog).filter(
             PushLog.user_id == user_id,
-            PushLog.game_id == game_id,
+            PushLog.game_slug == game_slug,
+            PushLog.is_next_week == is_next_week,
             PushLog.status == True
         ).first() is not None

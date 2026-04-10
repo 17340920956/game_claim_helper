@@ -22,3 +22,11 @@ coverage.xml
 .vscode/
 .env
 .env.*
+.codebuddy/
+build/
+db/
+docs/
+scripts/
+*.spec
+*.sh
+logs/

@@ -6,9 +6,7 @@ from datetime import datetime
 from bs4 import BeautifulSoup
 from app.core.config import get_settings
 from app.core.logger import logger
-from app.db.session import SessionLocal
-from app.repositories.game.game_repository import GameRepository
-from app.schemas.base import FreeGameCreate
+from app.db.redis import redis_client
 
 settings = get_settings()
 
@@ -45,34 +43,52 @@ class EpicScraper:
     def _is_current_free(self, promotion: Dict[str, Any]) -> bool:
         """
         判断是否为当前免费游戏
-        检查 discountPercentage 是否为 0
+        检查 promotionalOffers 中 discountPercentage 是否为 0
+        同时检查 upcomingPromotionalOffers 中已开始的活动（start_time 已过）
         """
         if not promotion:
             return False
+        
+        now = datetime.now().astimezone()
         
         promotional_offers = promotion.get("promotionalOffers", [])
         for offer_container in promotional_offers:
             for offer in offer_container.get("promotionalOffers", []):
                 if offer.get("discountSetting", {}).get("discountPercentage", 0) == 0:
                     return True
+        
+        # 检查 upcomingPromotionalOffers 中已开始的活动
+        # Epic API 有时会将当前进行中的活动放在 upcomingPromotionalOffers 中
+        upcoming_offers = promotion.get("upcomingPromotionalOffers", [])
+        for offer_container in upcoming_offers:
+            for offer in offer_container.get("promotionalOffers", []):
+                if offer.get("discountSetting", {}).get("discountPercentage", 0) == 0:
+                    start_date = self._parse_date(offer.get("startDate"))
+                    if start_date and start_date <= now:
+                        return True
         return False
     
     def _is_upcoming_free(self, promotion: Dict[str, Any]) -> bool:
         """
-        判断是否为即将到来的免费游戏
-        检查 upcomingPromotionalOffers 中的折扣信息
+        判断是否为即将到来的免费游戏（尚未开始）
+        检查 upcomingPromotionalOffers 中的折扣信息，且 start_time 在未来
         """
         if not promotion:
             return False
+        
+        now = datetime.now().astimezone()
         
         upcoming_offers = promotion.get("upcomingPromotionalOffers", [])
         for offer_container in upcoming_offers:
             for offer in offer_container.get("promotionalOffers", []):
                 if offer.get("discountSetting", {}).get("discountPercentage", 0) == 0:
-                    return True
+                    start_date = self._parse_date(offer.get("startDate"))
+                    # 只有尚未开始的活动才归为"即将免费"
+                    if start_date and start_date > now:
+                        return True
         return False
     
-    def _parse_game(self, game_data: Dict[str, Any]) -> Dict[str, Any]:
+    def _parse_game(self, game_data: Dict[str, Any], is_upcoming: bool = False) -> Dict[str, Any]:
         """
         解析单个游戏数据，提取标题、Slug、图片等关键信息
         """
@@ -133,12 +149,28 @@ class EpicScraper:
         start_date = None
         end_date = None
         
-        promotional_offers = promotion.get("promotionalOffers", [])
-        for offer_container in promotional_offers:
-            for offer in offer_container.get("promotionalOffers", []):
-                start_date = self._parse_date(offer.get("startDate"))
-                end_date = self._parse_date(offer.get("endDate"))
-                break
+        # 对于即将免费的游戏，优先使用 upcomingPromotionalOffers 的时间
+        if is_upcoming:
+            upcoming_offers = promotion.get("upcomingPromotionalOffers", [])
+            for offer_container in upcoming_offers:
+                for offer in offer_container.get("promotionalOffers", []):
+                    if offer.get("discountSetting", {}).get("discountPercentage", 0) == 0:
+                        start_date = self._parse_date(offer.get("startDate"))
+                        end_date = self._parse_date(offer.get("endDate"))
+                        break
+                if start_date:
+                    break
+        
+        # 如果没有从upcoming获取到时间，从 promotionalOffers 获取
+        if not start_date:
+            promotional_offers = promotion.get("promotionalOffers", [])
+            for offer_container in promotional_offers:
+                for offer in offer_container.get("promotionalOffers", []):
+                    start_date = self._parse_date(offer.get("startDate"))
+                    end_date = self._parse_date(offer.get("endDate"))
+                    break
+                if start_date:
+                    break
         
         if not start_date:
             upcoming_offers = promotion.get("upcomingPromotionalOffers", [])
@@ -147,12 +179,15 @@ class EpicScraper:
                     start_date = self._parse_date(offer.get("startDate"))
                     end_date = self._parse_date(offer.get("endDate"))
                     break
+                if start_date:
+                    break
         
+        # 序列化datetime为ISO格式字符串
         return {
             "name": title,
             "link": url,
-            "start_time": start_date,
-            "end_time": end_date,
+            "start_time": start_date.isoformat() if start_date else None,
+            "end_time": end_date.isoformat() if end_date else None,
             "image_url": image_url,
             "offer_id": offer_id,
             "namespace": namespace,
@@ -186,9 +221,9 @@ class EpicScraper:
                 promotions = game.get("promotions")
                 
                 if self._is_current_free(promotions):
-                    current_games.append(self._parse_game(game))
+                    current_games.append(self._parse_game(game, is_upcoming=False))
                 elif self._is_upcoming_free(promotions):
-                    upcoming_games.append(self._parse_game(game))
+                    upcoming_games.append(self._parse_game(game, is_upcoming=True))
             
         except requests.RequestException as e:
             logger.error(f"API请求失败: {e}")
@@ -206,60 +241,25 @@ scraper = EpicScraper()
 
 def fetch_and_store_games():
     """
-    协调函数：调用爬虫获取数据，并存储到 DB
+    协调函数：调用爬虫获取数据，并存储到 Redis
     """
     logger.info("开始爬取Epic免费游戏...")
     games = scraper.fetch_free_games()
     
-    db = SessionLocal()
-    repo = GameRepository(db)
-    
-    stored_games = []
-    
     try:
-        # 处理当前免费游戏
-        for game_data in games["current"]:
-            if not game_data.get("start_time") or not game_data.get("end_time"):
-                continue
-                
-            # 检查游戏是否已存在
-            existing_game = repo.get_game_by_name(game_data["name"])
-            if not existing_game:
-                game_create = FreeGameCreate(**game_data)
-                new_game = repo.create_game(game_create)
-                stored_games.append(new_game)
-                logger.info(f"新增本周免费游戏: {new_game.name}")
-            else:
-                # 更新已有游戏的时间、图片等信息
-                repo.update_game(existing_game, game_data)
-                logger.info(f"更新本周免费游戏: {existing_game.name}")
+        # 存储当前免费游戏到Redis
+        redis_client.set_current_week_games(games["current"])
+        logger.info(f"存储当前免费游戏 {len(games['current'])} 款到Redis")
         
-        # 处理下周预告游戏
-        for game_data in games["upcoming"]:
-            if not game_data.get("start_time") or not game_data.get("end_time"):
-                continue
-                
-            existing_game = repo.get_game_by_name(game_data["name"])
-            if not existing_game:
-                game_create = FreeGameCreate(**game_data)
-                new_game = repo.create_game(game_create)
-                stored_games.append(new_game)
-                logger.info(f"新增下周预告游戏: {new_game.name}")
-            else:
-                repo.update_game(existing_game, game_data)
-                logger.info(f"更新下周预告游戏: {existing_game.name}")
-                
+        # 存储下周预告游戏到Redis
+        redis_client.set_next_week_games(games["upcoming"])
+        logger.info(f"存储下周预告游戏 {len(games['upcoming'])} 款到Redis")
+        
     except Exception as e:
-        logger.error(f"存储游戏数据失败: {e}")
-    finally:
-        db.close()
+        logger.error(f"存储游戏数据到Redis失败: {e}")
     
     return games
 
 if __name__ == "__main__":
     games = fetch_and_store_games()
-    # Serialize datetime objects for printing
-    def default(o):
-        if isinstance(o, (datetime)):
-            return o.isoformat()
-    print(json.dumps(games, default=default, ensure_ascii=False, indent=2))
+    print(json.dumps(games, ensure_ascii=False, indent=2))

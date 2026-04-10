@@ -64,6 +64,7 @@ async def wechat_callback(
 
         # 2. Get Body & Decrypt if needed (Security Layer)
         body = await request.body()
+        logger.info(f"WeChat callback: encrypt_type={encrypt_type}, openid={openid}, body_len={len(body)}")
         if encrypt_type == 'aes':
             xml_content = WeChatSecurity.decrypt_message(body, msg_signature, timestamp, nonce)
         else:
@@ -80,7 +81,8 @@ async def wechat_callback(
         if reply_content == "success":
             return Response(content="success")
             
-        xml_response = service.generate_xml_response(reply_content, msg)
+        xml_response = service.generate_xml_response(reply_content, msg, openid=openid)
+        logger.info(f"WeChat response: type={type(reply_content).__name__}, xml_len={len(xml_response)}")
 
         # 6. Encrypt Response if needed (Security Layer)
         if encrypt_type == 'aes':
@@ -89,6 +91,6 @@ async def wechat_callback(
         return Response(content=xml_response, media_type="application/xml")
     
     except Exception as e:
-        logger.error(f"Error processing WeChat message: {e}")
+        logger.error(f"Error processing WeChat message: {e}", exc_info=True)
         # Return success to WeChat to avoid retries even if our processing failed
         return Response(content="success")

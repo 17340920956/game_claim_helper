@@ -48,35 +48,12 @@ class UserResponse(UserBase):
         return cls(**data)
 
 # ==========================
-# FreeGame Schemas
-# ==========================
-class FreeGameBase(BaseModel):
-    name: str
-    start_time: datetime
-    end_time: datetime
-    image_url: Optional[str] = None
-    link: Optional[str] = None
-    offer_id: Optional[str] = None
-    namespace: Optional[str] = None
-    note: Optional[str] = None
-
-class FreeGameCreate(FreeGameBase):
-    pass
-
-class FreeGameResponse(FreeGameBase):
-    id: int
-    created_at: datetime
-    updated_at: datetime
-
-    class Config:
-        from_attributes = True
-
-# ==========================
 # PushLog Schemas
 # ==========================
 class PushLogBase(BaseModel):
     user_id: int
-    game_id: int
+    game_name: str
+    game_slug: Optional[str] = None
     status: bool
     is_next_week: bool = False
     note: Optional[str] = None
@@ -94,6 +71,4 @@ class PushLogResponse(PushLogBase):
 # ==========================
 # API Request Schemas
 # ==========================
-class PushRequest(BaseModel):
-    user_id: int
-    game_id: int
+# 如果需要其他请求schema可以在此添加

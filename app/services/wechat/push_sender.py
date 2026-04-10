@@ -5,7 +5,7 @@ from app.db.redis import redis_client
 from app.clients.wechat.wechat_api_client import CustomWeChatClient
 from app.core.config import get_settings
 from app.core.logger import logger
-from app.models.base import FreeGame
+from datetime import datetime
 
 settings = get_settings()
 
@@ -14,6 +14,11 @@ def _local_time(dt) -> str:
     """UTC 转本地时间字符串"""
     if dt is None:
         return "未知"
+    if isinstance(dt, str):
+        try:
+            dt = datetime.fromisoformat(dt.replace("Z", "+00:00"))
+        except:
+            return dt
     try:
         if dt.tzinfo:
             local_dt = dt.astimezone()
@@ -61,18 +66,18 @@ class WeChatOfficialPusher(BasePusher):
     def send_game_notification(
         self, 
         contact_id: str, 
-        game: FreeGame
+        game: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
         发送游戏通知（使用文本消息）
         """
         message = f"""Epic 本周免费游戏上线啦！
 
-游戏名称：{game.name}
-游戏图片：{game.image_url or '暂无'}
-领取链接：{game.link or '暂无'}
-开始时间：{_local_time(game.start_time)}
-结束时间：{_local_time(game.end_time)}
+游戏名称：{game.get('name', '未知')}
+游戏图片：{game.get('image_url') or '暂无'}
+领取链接：{game.get('link') or '暂无'}
+开始时间：{_local_time(game.get('start_time'))}
+结束时间：{_local_time(game.get('end_time'))}
 
 请点击链接领取游戏，或回复"领取"让我们帮您领取。"""
         
@@ -81,7 +86,7 @@ class WeChatOfficialPusher(BasePusher):
     def send_games_batch_notification(
         self,
         contact_id: str,
-        games: List[FreeGame]
+        games: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """
         批量发送游戏通知（多款游戏）
@@ -91,10 +96,10 @@ class WeChatOfficialPusher(BasePusher):
         
         lines = ["Epic 本周多款免费游戏上线！\n"]
         for i, game in enumerate(games, 1):
-            lines.append(f"{i}. {game.name}")
-            lines.append(f"   图片：{game.image_url or '暂无'}")
-            lines.append(f"   链接：{game.link or '暂无'}")
-            lines.append(f"   时间：{_local_time(game.start_time)} ~ {_local_time(game.end_time)}")
+            lines.append(f"{i}. {game.get('name', '未知')}")
+            lines.append(f"   图片：{game.get('image_url') or '暂无'}")
+            lines.append(f"   链接：{game.get('link') or '暂无'}")
+            lines.append(f"   时间：{_local_time(game.get('start_time'))} ~ {_local_time(game.get('end_time'))}")
             lines.append("")
         
         lines.append('请点击链接领取游戏，或回复"领取"让我们帮您领取。')

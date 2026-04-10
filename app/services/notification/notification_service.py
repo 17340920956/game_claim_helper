@@ -1,7 +1,8 @@
 from typing import Dict, Any, Optional, List
 from app.services.wechat.push_sender import WeChatOfficialPusher
 from app.core.config import get_settings
-from app.models.base import User, FreeGame
+from app.models.base import User
+from datetime import datetime
 
 settings = get_settings()
 
@@ -10,6 +11,11 @@ def _local_time(dt) -> str:
     """UTC 转本地时间字符串"""
     if dt is None:
         return "未知"
+    if isinstance(dt, str):
+        try:
+            dt = datetime.fromisoformat(dt.replace("Z", "+00:00"))
+        except:
+            return dt
     try:
         if dt.tzinfo:
             local_dt = dt.astimezone()
@@ -29,22 +35,22 @@ class PushService:
     def __init__(self):
         self.wechat_official_pusher = WeChatOfficialPusher()
 
-    def _format_current_game_message(self, game: FreeGame, user_id: Optional[int] = None) -> str:
+    def _format_current_game_message(self, game: Dict[str, Any], user_id: Optional[int] = None) -> str:
         """格式化本周免费游戏消息"""
         msg = f"""Epic 本周免费游戏上线啦！
 
-游戏名：{game.name}
-图片：{game.image_url or '暂无'}
-领取链接：{game.link or '暂无'}
-开始时间：{_local_time(game.start_time)}
-结束时间：{_local_time(game.end_time)}
+游戏名：{game.get('name', '未知')}
+图片：{game.get('image_url') or '暂无'}
+领取链接：{game.get('link') or '暂无'}
+开始时间：{_local_time(game.get('start_time'))}
+结束时间：{_local_time(game.get('end_time'))}
 
 请回复"确认"表示已收到，或回复"领取"让我们帮您领取游戏。"""
         return msg
 
-    def _format_next_week_message(self, games: List[FreeGame]) -> str:
+    def _format_next_week_message(self, games: List[Dict[str, Any]]) -> str:
         """格式化下周预告消息"""
-        titles = [g.name for g in games]
+        titles = [g.get('name', '未知') for g in games]
         title_list = "\n".join([f"  - {t}" for t in titles])
         return f"""下周 Epic 免费游戏预告：
 {title_list}
@@ -59,7 +65,7 @@ class PushService:
             return {"success": False, "error": "用户未绑定微信"}
 
     def push_game_notification(
-        self, user: User, game: FreeGame, is_next_week: bool = False
+        self, user: User, game: Dict[str, Any], is_next_week: bool = False
     ) -> Dict[str, Any]:
         """推送单个游戏的通知"""
         if is_next_week:
@@ -72,7 +78,7 @@ class PushService:
                 return {"success": False, "error": "用户未绑定微信"}
 
     def push_games_batch(
-        self, user: User, games: List[FreeGame], is_next_week: bool = False
+        self, user: User, games: List[Dict[str, Any]], is_next_week: bool = False
     ) -> Dict[str, Any]:
         """批量推送游戏通知"""
         if is_next_week:

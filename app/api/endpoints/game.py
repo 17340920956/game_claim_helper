@@ -2,9 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import Optional
 from app.db.session import get_db
-from app.repositories.game.game_repository import GameRepository
 from app.services.game.scraper_service import fetch_and_store_games
 from app.services.game.claim_service import epic_claim_service
+from app.db.redis import redis_client
 from app.schemas.game import GameResponse, GameListResponse
 from app.core.security import verify_admin_access
 from app.core.logger import logger
@@ -13,16 +13,25 @@ from datetime import datetime
 router = APIRouter()
 
 
-def _build_game_response(game) -> GameResponse:
-    return GameResponse.model_validate(game)
+def _build_game_response(game_dict: dict) -> GameResponse:
+    """将 Redis 中的游戏字典转换为响应模型"""
+    return GameResponse(
+        name=game_dict.get('name', '未知'),
+        link=game_dict.get('link'),
+        image_url=game_dict.get('image_url'),
+        start_time=game_dict.get('start_time'),
+        end_time=game_dict.get('end_time'),
+        offer_id=game_dict.get('offer_id'),
+        namespace=game_dict.get('namespace'),
+        note=game_dict.get('note')
+    )
 
 
 @router.get("/games/current", response_model=GameListResponse)
-async def get_current_free_games(db: Session = Depends(get_db)):
+async def get_current_free_games():
     """获取当前免费游戏列表"""
     try:
-        repo = GameRepository(db)
-        games = repo.get_active_games()
+        games = redis_client.get_current_week_games()
         return GameListResponse(
             total=len(games),
             games=[_build_game_response(g) for g in games]
@@ -33,11 +42,10 @@ async def get_current_free_games(db: Session = Depends(get_db)):
 
 
 @router.get("/games/upcoming", response_model=GameListResponse)
-async def get_upcoming_free_games(db: Session = Depends(get_db)):
+async def get_upcoming_free_games():
     """获取即将免费游戏列表"""
     try:
-        repo = GameRepository(db)
-        games = repo.get_upcoming_games()
+        games = redis_client.get_next_week_games()
         return GameListResponse(
             total=len(games),
             games=[_build_game_response(g) for g in games]
@@ -49,18 +57,16 @@ async def get_upcoming_free_games(db: Session = Depends(get_db)):
 
 @router.get("/games/all", response_model=GameListResponse)
 async def get_all_free_games(
-    status: Optional[str] = Query(None, description="游戏状态筛选: current, upcoming, expired"),
-    db: Session = Depends(get_db)
+    status: Optional[str] = Query(None, description="游戏状态筛选: current, upcoming")
 ):
     """获取所有游戏列表（支持状态筛选）"""
     try:
-        repo = GameRepository(db)
-        status_map = {
-            "current": repo.get_active_games,
-            "upcoming": repo.get_upcoming_games,
-            "expired": repo.get_expired_games,
-        }
-        games = status_map.get(status, repo.get_all_games)()
+        if status == "upcoming":
+            games = redis_client.get_next_week_games()
+        else:
+            # 默认返回当前游戏
+            games = redis_client.get_current_week_games()
+        
         return GameListResponse(
             total=len(games),
             games=[_build_game_response(g) for g in games]
@@ -87,20 +93,4 @@ async def refresh_free_games():
         }
     except Exception as e:
         logger.error(f"刷新游戏数据失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/games/{game_id}", response_model=GameResponse)
-async def get_game_by_id(game_id: int, db: Session = Depends(get_db)):
-    """根据 ID 获取游戏详情"""
-    try:
-        repo = GameRepository(db)
-        game = repo.get_by_id(game_id)
-        if not game:
-            raise HTTPException(status_code=404, detail="游戏不存在")
-        return _build_game_response(game)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"获取游戏详情失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -4,18 +4,14 @@ from typing import Optional
 
 class GameResponse(BaseModel):
     """游戏响应模型"""
-    id: int
     name: str
     link: Optional[str] = None
     image_url: Optional[str] = None
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
     offer_id: Optional[str] = None
     namespace: Optional[str] = None
     note: Optional[str] = None
-    
-    class Config:
-        from_attributes = True
 
 class GameListResponse(BaseModel):
     """游戏列表响应模型"""

@@ -17,6 +17,11 @@ EPIC_LAUNCHER_API = "https://launcher-public-service-prod08.ol.epicgames.com"
 EPIC_GRAPHQL_URL = "https://graphql.epicgames.com/graphql"
 EPIC_ORDER_API = "https://store-site-backend-static.ak.epicgames.com"
 
+# launcherAppClient2 凭证
+EPIC_CLIENT_ID = "34a02cf8f4414e29b15921876da36f9a"
+EPIC_CLIENT_SECRET = "daafbccc737745039dffe53d94fc76cf"
+EPIC_AUTH_BASIC = "MzRhMDJjZjhmNDQxNGUyOWIxNTkyMTg3NmRhMzZmOWE6ZGFhZmJjY2M3Mzc3NDUwMzlkZmZlNTNkOTRmYzc2Y2Y="
+
 # Epic 登录 Headers
 EPIC_AUTH_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) EpicGamesLauncher/13.0.0-14995143+++Portal+Release-Live Chrome/108.0.5359.215 Safari/537.36",
@@ -65,7 +70,7 @@ class EpicClaimService:
                 f"{EPIC_AUTH_API}/account/api/oauth/token",
                 headers={
                     **EPIC_AUTH_HEADERS,
-                    "Authorization": "basic MzQ0NmNjNjctYYjdkYYjQtYYjQtYYjtYYQtYYjgtYjU3YYjRjYjQ5YT==",
+                    "Authorization": f"basic {EPIC_AUTH_BASIC}",
                 },
                 data={
                     "grant_type": "client_credentials",
@@ -142,7 +147,7 @@ class EpicClaimService:
                 },
                 headers={
                     **EPIC_AUTH_HEADERS,
-                    "Authorization": "basic MzQ0NmNjNjctYYjdkYYjQtYYjQtYYjtYYQtYYjgtYjU3YYjRjYjQ5YT==",
+                    "Authorization": f"basic {EPIC_AUTH_BASIC}",
                 },
             )
             resp.raise_for_status()
@@ -248,9 +253,20 @@ class EpicClaimService:
         except Exception as e:
             logger.exception(f"Epic 领取未知异常: {e}")
             return {"success": False, "message": f"系统异常: {e}", "game_name": ""}
+
+
+class EpicClaimServiceSingleton:
+    """延迟实例化，每次 claim_game 创建新 session"""
+    def __init__(self):
+        self._instance = None
+
+    def claim_game(self, email: str, encrypted_password: str, offer_id: str, namespace: str) -> Dict[str, Any]:
+        # 每次领取创建新实例，避免 session 复用问题
+        service = EpicClaimService()
+        try:
+            return service.claim_game(email, encrypted_password, offer_id, namespace)
         finally:
-            self.session.close()
+            service.session.close()
 
 
-# 全局服务实例
-epic_claim_service = EpicClaimService()
+epic_claim_service = EpicClaimServiceSingleton()

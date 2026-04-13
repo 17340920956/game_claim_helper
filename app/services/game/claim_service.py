@@ -412,7 +412,8 @@ class EpicClaimService:
             
             if executable_path:
                 launch_options["executable_path"] = executable_path
-                logger.info(f"启动浏览器，executable_path={executable_path}")
+                launch_options["channel"] = "chrome"  # 强制使用 chrome 渠道
+                logger.info(f"启动浏览器，executable_path={executable_path}, channel=chrome")
             else:
                 logger.warning("未找到浏览器可执行文件，尝试使用默认路径")
             

@@ -362,9 +362,22 @@ class EpicClaimService:
             pw = await async_playwright().start()
             
             # 启动 Chromium（headless 模式，无头服务器环境）
-            browser = await pw.chromium.launch(
-                headless=True,
-                args=[
+            # 尝试查找 Chromium 可执行文件
+            import os
+            chromium_paths = [
+                "/root/.cache/ms-playwright/chromium-1148/chrome-linux/chrome",
+                "/root/.cache/ms-playwright/chromium-1148/chrome-linux/chromium",
+            ]
+            executable_path = None
+            for path in chromium_paths:
+                if os.path.exists(path):
+                    executable_path = path
+                    logger.info(f"使用 Chromium 可执行文件: {executable_path}")
+                    break
+            
+            launch_options = {
+                "headless": True,
+                "args": [
                     "--no-sandbox",
                     "--disable-setuid-sandbox",
                     "--disable-dev-shm-usage",
@@ -374,7 +387,12 @@ class EpicClaimService:
                     "--disable-software-rasterizer",
                     "--window-size=1280,800",
                 ]
-            )
+            }
+            
+            if executable_path:
+                launch_options["executable_path"] = executable_path
+            
+            browser = await pw.chromium.launch(**launch_options)
 
             context = await browser.new_context(
                 viewport={"width": 1280, "height": 800},

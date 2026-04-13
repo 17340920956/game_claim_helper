@@ -23,8 +23,10 @@ RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple -r re
     pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ -r requirements.txt || \
     pip install --no-cache-dir -r requirements.txt
 
-# 安装 Playwright 及 Chromium
-RUN playwright install chromium --with-deps || true
+# 安装 Playwright 及 Chromium（使用国内镜像源）
+ENV PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
+RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple playwright || pip install --no-cache-dir playwright
+RUN playwright install chromium --with-deps || playwright install chromium
 
 # 复制项目文件
 COPY . .

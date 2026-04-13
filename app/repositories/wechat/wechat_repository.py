@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 from app.models.base import User
 from app.core.crypto import encrypt_password, decrypt_password
+from app.core.logger import logger
 
 
 class WeChatRepository:
@@ -10,6 +11,12 @@ class WeChatRepository:
     def get_user_by_openid(self, openid: str) -> User:
         return self.db.query(User).filter(
             User.wx_id == openid,
+            User.is_del == False
+        ).first()
+
+    def get_user_by_id(self, user_id: int) -> User:
+        return self.db.query(User).filter(
+            User.id == user_id,
             User.is_del == False
         ).first()
 
@@ -55,10 +62,15 @@ class WeChatRepository:
 
     def update_user_refresh_token(self, user: User, refresh_token: str):
         """更新用户的 Epic Refresh Token"""
-        user.epic_refresh_token = encrypt_password(refresh_token)
-        self.db.commit()
-        self.db.refresh(user)
-        return user
+        try:
+            user.epic_refresh_token = encrypt_password(refresh_token)
+            self.db.commit()
+            self.db.refresh(user)
+            return user
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"更新 refresh_token 失败: {e}", exc_info=True)
+            raise
 
     def clear_user_epic_account(self, user: User):
         """清除用户所有 Epic 相关信息"""

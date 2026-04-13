@@ -21,6 +21,13 @@ _SHANGHAI_TZ_OFFSET = datetime.now().astimezone().utcoffset() or __import__('dat
 USER_STATE_PREFIX = "wechat:user_state:"
 USER_STATE_TTL = 600  # 10分钟过期
 
+# 被动图文：无封面时使用；描述过长时截断（微信约 512 字节量级，保守按字符截断）
+DEFAULT_GAME_COVER_URL = "https://via.placeholder.com/800x400?text=Epic+Free"
+EPIC_FREE_STORE_ZH = "https://store.epicgames.com/zh-CN/free-games"
+WECHAT_ARTICLE_DESC_MAX = 500
+WECHAT_ARTICLE_TITLE_MAX = 64
+MAX_PASSIVE_ARTICLES = 10
+
 
 def _format_time(dt) -> str:
     """将 UTC datetime 转为本地时间字符串显示"""
@@ -143,6 +150,75 @@ class WeChatService:
 
         return reply_content
 
+    def process_message_for_multi_reply(self, msg: BaseMessage, openid: str) -> Dict[str, Any]:
+        """
+        处理消息并返回多回复内容（用于客服消息推送模式）
+        返回格式：{"type": "multi_reply", "messages": [msg1, msg2, ...], "articles": [article1, article2, ...]}
+        """
+        result = {"type": "multi_reply", "messages": [], "articles": []}
+        
+        user = self.repository.get_user_by_openid(openid)
+        if not user:
+            user = self.repository.create_user(openid)
+            logger.info(f"New WeChat user created: {openid}")
+            result["messages"].append("欢迎关注！您的账号已自动创建。\n\n回复'帮助'查看可用命令。")
+            return result
+        
+        if msg.type == 'text':
+            content = msg.content.strip()
+            logger.info(f"Received message from {openid}: {content} (multi-reply mode)")
+            
+            # 处理游戏查询 - 返回多条图文
+            if content.lower() in ('游戏', '免费游戏', '查看游戏', '查看免费游戏', '当前游戏'):
+                games = self._get_active_games()
+                upcoming_games = self._get_upcoming_games()
+                
+                logger.info(f"多消息模式: 当前免费={len(games)}, 即将免费={len(upcoming_games)}")
+                
+                if not games and not upcoming_games:
+                    result["messages"].append("当前没有免费游戏信息。\n\n回复'刷新'更新游戏数据。")
+                    return result
+                
+                # 为每款当前免费游戏生成独立的图文消息
+                for i, game in enumerate(games):
+                    article = self._game_passive_article(game, upcoming=False)
+                    result["articles"].append(article)
+                    logger.info(f"  添加游戏图文 {i+1}: {game.get('name')}")
+                
+                # 为每款即将免费的游戏生成独立的图文消息
+                for i, game in enumerate(upcoming_games):
+                    article = self._game_passive_article(game, upcoming=True)
+                    result["articles"].append(article)
+                    logger.info(f"  添加即将免费图文 {i+1}: {game.get('name')}")
+                
+                # 添加汇总文本消息
+                summary_lines = [f"📊 本周共找到 {len(games)} 款正在免费的游戏"]
+                if upcoming_games:
+                    summary_lines.append(f"以及 {len(upcoming_games)} 款即将免费的游戏")
+                summary_lines.append("\n已为您逐条展示，请向上滑动查看全部内容！")
+                summary_lines.append("\n回复「领取」可自动领取免费游戏")
+                result["messages"].append("\n".join(summary_lines))
+                
+                return result
+            
+            # 其他命令使用原有逻辑，但包装为 multi_reply 格式
+            reply = self._handle_text_message(user.id, openid, content, user)
+            if isinstance(reply, dict) and reply.get("type") == "articles":
+                result["articles"] = reply.get("articles", [])
+            else:
+                result["messages"].append(reply if isinstance(reply, str) else str(reply))
+            
+            return result
+        
+        elif msg.type == 'event':
+            if msg.event == 'subscribe':
+                result["messages"].append("感谢关注！\n\n回复'帮助'查看可用命令。")
+            elif msg.event == 'unsubscribe':
+                if user:
+                    self.repository.update_user_active_status(user, False)
+        
+        return result
+
     def _handle_text_message(self, user_id: int, openid: str, content: str, user) -> Union[str, Dict[str, Any]]:
         """处理文本消息"""
 
@@ -152,6 +228,12 @@ class WeChatService:
             if state:
                 self._clear_state(user_id)
                 return "操作已取消。\n\n回复'帮助'查看可用命令。"
+
+        # 绑定已由后台完成并清状态后，用户仍回复「完成」
+        if content.strip() in ('完成', '好了'):
+            fresh = self.repository.get_user_by_id(user_id)
+            if fresh and self._user_has_epic_binding(fresh):
+                return "绑定已生效。\n\n回复「领取」即可代领免费游戏。"
 
         # 优先检查用户多轮对话状态
         state = self._get_state(user_id)
@@ -163,7 +245,7 @@ class WeChatService:
         commands = {
             frozenset(['帮助', 'help', '?']): self._get_help_message,
             frozenset(['确认', '收到']): lambda: "收到确认，感谢您的回复！",
-            frozenset(['领取', '领取游戏']): lambda: self._handle_claim_request(user),
+            frozenset(['领取', '领取游戏']): lambda: self._handle_claim_request(user, openid),
             frozenset(['绑定', '绑定账号']): None,  # 特殊处理
             frozenset(['解绑', '解绑账号']): lambda: self._handle_unbind(user),
             frozenset(['游戏', '免费游戏', '查看游戏', '查看免费游戏', '当前游戏']): lambda: self._get_current_games_message(),
@@ -175,7 +257,7 @@ class WeChatService:
         for cmd_set, handler in commands.items():
             if content_lower in cmd_set:
                 if content_lower in ('绑定', '绑定账号'):
-                    return self._handle_bind_request(user)
+                    return self._handle_bind_request(user, openid)
                 return handler() if handler else "收到"
 
         return "收到您的消息！\n\n回复'帮助'查看可用命令。"
@@ -188,87 +270,96 @@ class WeChatService:
 
         if step == 'waiting_device_auth':
             if content.strip().lower() in ('完成', '好了', 'ok', 'yes', '是'):
-                # 用户声称已完成授权，主动检查一次
+                # 后台线程可能已用掉 device_code 并完成写入，必须先读库避免重复 poll 失败
+                fresh = self.repository.get_user_by_id(user_id)
+                if fresh and self._user_has_epic_binding(fresh):
+                    self._clear_state(user_id)
+                    return "绑定已生效。\n\n回复「领取」即可代领免费游戏。"
+
                 device_code = state.get('device_code')
                 if device_code:
                     try:
-                        auth_result = epic_claim_service.poll_device_code(device_code, timeout=10, interval=3)
-                        # 授权成功！处理绑定
+                        auth_result = epic_claim_service.poll_device_code(device_code, timeout=20, interval=3)
                         access_token = auth_result["access_token"]
                         refresh_token = auth_result.get("refresh_token")
                         account_id = auth_result["account_id"]
                         email = self._get_epic_email(access_token, account_id)
 
-                        # 创建 Device Auth
                         device_auth = None
                         try:
                             device_auth = epic_claim_service.create_device_auth(access_token, account_id)
                         except Exception as e:
                             logger.warning(f"Failed to create Device Auth: {e}")
 
-                        # 保存到数据库
                         self._save_binding_to_db(user_id, account_id, email, refresh_token, device_auth)
-
-                        # 清除状态
                         self._clear_state(user_id)
-                        return f"✅ Epic 账号绑定成功！\n📧 邮箱：{email or '已关联'}\n\n回复'领取'让我们帮您领取免费游戏。"
+                        bound = self.repository.get_user_by_id(user_id)
+                        return self._bind_success_message(bound) if bound else self._bind_success_message(user)
                     except Exception as e:
                         logger.info(f"User claimed done but auth not ready: {e}")
-                        return "⏳ 还未检测到授权成功，请确认已在浏览器中完成登录。\n\n稍后再回复'完成'，或回复'取消'退出。"
-            # 其他消息提示等待
-            return "⏳ 请先在浏览器中完成 Epic 账号授权。\n\n授权完成后回复'完成'，回复'取消'退出绑定流程。"
-
-        elif step == 'confirm_device_auth':
-            if content.strip().lower() in ('完成', '好了', 'ok', 'yes', '是'):
-                # 后台轮询已检测到授权成功，直接完成绑定
-                return self._complete_binding(user, user_id, state)
-            elif content.strip().lower() in ('取消', '退出', 'cancel', 'quit'):
-                self._clear_state(user_id)
-                return "已取消绑定。\n\n回复'绑定'可重新开始。"
-            else:
-                return "⏳ 请先在浏览器中完成 Epic 授权，然后回复'完成'确认。\n\n回复'取消'退出绑定流程。"
+                        return "⏳ 还未检测到授权成功，请确认已在浏览器中完成登录。\n\n稍后再回复「完成」，或回复「取消」退出。"
+            return "⏳ 请先在浏览器中完成 Epic 账号授权。\n\n授权完成后回复「完成」；也可等待系统自动提示成功。回复「取消」退出绑定。"
 
         else:
             self._clear_state(user_id)
-            return "操作已超时或无效。\n\n回复'帮助'查看可用命令。"
+            return "操作已超时或无效。\n\n回复「帮助」查看可用命令。"
 
     # ==================== 绑定相关 ====================
 
-    def _handle_bind_request(self, user) -> str:
+    @staticmethod
+    def _user_has_epic_binding(user) -> bool:
+        if not user:
+            return False
+        return bool(user.epic_refresh_token or (user.epic_device_id and user.epic_device_secret))
+
+    @staticmethod
+    def _bind_success_message(user) -> str:
+        return (
+            f"✅ Epic 账号绑定成功！\n📧 邮箱：{user.epic_email or '已关联'}\n\n"
+            f"回复「领取」让我们帮您领取免费游戏。"
+        )
+
+    def _handle_bind_request(self, user, openid: str) -> str:
         """处理绑定请求 - 使用 Device Code 流程"""
-        # 检查是否已绑定（有 refresh_token 或旧的 device_auth）
-        has_auth = user.epic_refresh_token or (user.epic_device_id and user.epic_device_secret)
-        if has_auth:
-            return f"您已绑定 Epic 账号（{user.epic_email or '已关联'}）。\n\n回复'解绑'可先解除绑定再重新绑定。"
+        if self._user_has_epic_binding(user):
+            return (
+                f"您已绑定 Epic 账号（{user.epic_email or '已关联'}）。\n\n"
+                f"回复「解绑」可先解除绑定再重新绑定。"
+            )
 
-        return self._handle_bind_request_with_message(user)
+        return self._handle_bind_request_with_message(user, openid=openid)
 
-    def _handle_bind_request_with_message(self, user, prefix_msg: str = "") -> str:
-        """处理绑定请求的内部实现，支持自定义前缀消息"""
+    def _handle_bind_request_with_message(self, user, prefix_msg: str = "", openid: str = "") -> str:
+        """处理绑定请求：下发浏览器授权链接，后台轮询成功后写库并发客服提示。"""
         try:
             device_code_data = epic_claim_service.create_device_code()
             verification_uri = device_code_data.get("verification_uri_complete", "")
             user_code = device_code_data.get("user_code", "")
+            expires_in = int(device_code_data.get("expires_in") or 600)
+            minutes = max(1, expires_in // 60)
 
             if not verification_uri:
                 return "❌ 获取授权链接失败，请稍后再试。"
 
-            # 保存 device_code 到状态
             self._set_state(user.id, {
                 'step': 'waiting_device_auth',
                 'device_code': device_code_data.get("device_code"),
                 'user_code': user_code,
             })
 
-            # 启动后台轮询线程
-            self._start_background_poll(user.id, device_code_data.get("device_code"))
+            self._start_background_poll(
+                user.id,
+                device_code_data.get("device_code"),
+                openid,
+                expires_in=min(expires_in + 60, 720),
+            )
 
             bind_message = (
-                f"🔗 请点击以下链接完成 Epic 账号授权：\n\n"
+                f"🔗 请在浏览器中打开以下链接完成 Epic 授权：\n\n"
                 f"{verification_uri}\n\n"
                 f"授权码：{user_code}\n\n"
-                f"请在10分钟内完成授权，完成后回复'完成'。\n"
-                f"回复'取消'退出绑定流程。"
+                f"请在约 {minutes} 分钟内完成。授权成功后您将收到「绑定成功」提示；\n"
+                f"也可在完成后回复「完成」。回复「取消」退出绑定。"
             )
 
             return prefix_msg + bind_message
@@ -276,20 +367,18 @@ class WeChatService:
             logger.error(f"创建 Device Code 失败: {e}")
             return "❌ 获取授权链接失败，请稍后再试。"
 
-    def _start_background_poll(self, user_id: int, device_code: str):
-        """启动后台线程轮询 Device Code 授权状态"""
+    def _start_background_poll(self, user_id: int, device_code: str, openid: str, expires_in: int = 660):
+        """后台轮询 Device Code；成功后写库、清除会话状态，并发一条客服文字提示（避免仅靠回复「完成」）。"""
         def poll():
             try:
-                auth_result = epic_claim_service.poll_device_code(device_code, timeout=540, interval=10)
-                # 授权成功
+                auth_result = epic_claim_service.poll_device_code(
+                    device_code, timeout=max(60, expires_in), interval=10
+                )
                 access_token = auth_result["access_token"]
                 refresh_token = auth_result.get("refresh_token")
                 account_id = auth_result["account_id"]
-
-                # 获取用户邮箱
                 email = self._get_epic_email(access_token, account_id)
 
-                # 创建 Device Auth 凭证（长期有效，优先使用）
                 device_auth = None
                 try:
                     device_auth = epic_claim_service.create_device_auth(access_token, account_id)
@@ -297,17 +386,24 @@ class WeChatService:
                 except Exception as e:
                     logger.warning(f"Background poll: Failed to create Device Auth: {e}")
 
-                # 保存到数据库
                 self._save_binding_to_db(user_id, account_id, email, refresh_token, device_auth)
+                self._clear_state(user_id)
 
-                # 更新 Redis 状态为已确认
-                self._set_state(user_id, {
-                    'step': 'confirm_device_auth',
-                    'device_code': device_code,
-                    'email': email,
-                })
+                if openid:
+                    try:
+                        from app.services.wechat.push_sender import WeChatOfficialPusher
+                        pusher = WeChatOfficialPusher()
+                        msg = (
+                            f"✅ Epic 账号绑定成功！\n📧 邮箱：{email or '已关联'}\n\n"
+                            f"回复「领取」让我们帮您领取免费游戏。"
+                        )
+                        result = pusher.send_message(openid, msg)
+                        if not result.get("success"):
+                            logger.warning(f"Bind success customer msg failed: {result.get('error')}")
+                    except Exception as e:
+                        logger.warning(f"Bind success customer notify error: {e}")
             except Exception as e:
-                logger.info(f"Background poll: User {user_id} device code expired or failed: {e}")
+                logger.info(f"Background poll: User {user_id} device code wait ended: {e}")
 
         thread = threading.Thread(target=poll, daemon=True)
         thread.start()
@@ -340,13 +436,6 @@ class WeChatService:
         finally:
             db.close()
 
-    def _complete_binding(self, user, user_id: int, state: dict) -> str:
-        """完成绑定流程"""
-        email = state.get('email')
-        self._clear_state(user_id)
-        logger.info(f"User {user_id} bound Epic account: {email}")
-        return f"✅ Epic 账号绑定成功！\n📧 邮箱：{email or '已关联'}\n\n回复'领取'让我们帮您领取免费游戏。"
-
     def _get_epic_email(self, access_token: str, account_id: str = "") -> Optional[str]:
         """通过 access_token 获取用户邮箱和显示名称"""
         try:
@@ -369,7 +458,7 @@ class WeChatService:
 
     # ==================== 领取相关 ====================
 
-    def _handle_claim_request(self, user) -> str:
+    def _handle_claim_request(self, user, openid: str = "") -> str:
         """处理领取请求 - 先尝试自动授权，失败时引导重新绑定"""
         # 检查认证方式
         has_refresh_token = bool(user.epic_refresh_token)
@@ -407,7 +496,8 @@ class WeChatService:
             return self._handle_bind_request_with_message(
                 user,
                 f"⚠️ 您的 Epic 授权已失效，已自动清除。\n\n"
-                f"请重新绑定以继续领取游戏：\n\n"
+                f"请重新绑定以继续领取游戏：\n\n",
+                openid=openid,
             )
 
         # 第一游戏领取成功或非凭证问题，继续领取剩余游戏
@@ -443,6 +533,7 @@ class WeChatService:
                 account_id=user.epic_id,
                 email=user.epic_email or "",
                 encrypted_password=user.epic_password or "",
+                game_url=game.get("note") or "",
             )
 
             logger.info(f"Claim result for {game_name}: success={result.get('success')}, "
@@ -454,7 +545,8 @@ class WeChatService:
                     self.repository.update_user_refresh_token(user, result["new_refresh_token"])
                     logger.info(f"Updated refresh token for user {user.id}")
                 except Exception as e:
-                    logger.warning(f"Failed to update refresh token for user {user.id}: {e}")
+                    logger.error(f"Failed to update refresh token for user {user.id}: {e}", exc_info=True)
+                    # Session 已回滚，继续返回结果
 
             if result["success"]:
                 msg = f"✅ 领取「{game_name}」成功！{result.get('message', '')}"
@@ -466,163 +558,145 @@ class WeChatService:
             return msg
         except Exception as e:
             logger.exception(f"领取游戏异常: {e}")
+            # 确保回滚 Session 以避免影响后续操作
+            try:
+                self.repository.db.rollback()
+            except Exception:
+                pass
             return f"❌ 领取「{game_name}」时发生异常：{str(e)}"
 
     # ==================== 游戏查询 ====================
 
+    def _game_time_info_active(self, game: Dict[str, Any]) -> str:
+        start_time_str = game.get("start_time")
+        end_time_str = game.get("end_time")
+        if not start_time_str or not end_time_str:
+            return ""
+        try:
+            start_time = datetime.fromisoformat(start_time_str.replace("Z", "+00:00"))
+            end_time = datetime.fromisoformat(end_time_str.replace("Z", "+00:00"))
+            return f"\n免费时间：{_format_time(start_time)} ~ {_format_time(end_time)}"
+        except Exception:
+            return ""
+
+    def _game_time_info_upcoming(self, game: Dict[str, Any]) -> str:
+        start_time_str = game.get("start_time")
+        end_time_str = game.get("end_time")
+        if not start_time_str:
+            return ""
+        try:
+            start_time = datetime.fromisoformat(start_time_str.replace("Z", "+00:00"))
+            line = f"\n开始时间：{_format_time(start_time)}"
+            if end_time_str:
+                end_time = datetime.fromisoformat(end_time_str.replace("Z", "+00:00"))
+                line += f" ~ {_format_time(end_time)}"
+            return line
+        except Exception:
+            return ""
+
+    def _game_passive_article(self, game: Dict[str, Any], *, upcoming: bool) -> Dict[str, str]:
+        """被动回复单条图文：封面图 + 可点击 Url + 描述中的完整链接文本。"""
+        link = (game.get("link") or "").strip() or EPIC_FREE_STORE_ZH
+        pic = (game.get("image_url") or "").strip() or DEFAULT_GAME_COVER_URL
+        name = game.get("name", "未知游戏")
+        if upcoming:
+            time_part = self._game_time_info_upcoming(game)
+            desc = f"📅 即将免费{time_part}\n\n🔗 完整链接：\n{link}"
+            title = f"🔜 {name}"
+        else:
+            time_part = self._game_time_info_active(game)
+            desc = f"🔥 正在免费领取{time_part}\n\n🔗 完整链接：\n{link}\n\n回复「领取」可代领。"
+            title = f"🎮 {name}"
+        title = title[:WECHAT_ARTICLE_TITLE_MAX]
+        desc = desc[:WECHAT_ARTICLE_DESC_MAX]
+        return {"title": title, "description": desc, "image": pic, "url": link}
+
+    def _build_passive_articles_merged(
+        self, current_games: List[Dict[str, Any]], upcoming_games: List[Dict[str, Any]]
+    ) -> List[Dict[str, str]]:
+        """合并当前免费 + 即将免费，被动图文最多 10 条（微信限制）。"""
+        combined: List[tuple] = [(g, False) for g in current_games] + [(g, True) for g in upcoming_games]
+        if len(combined) <= MAX_PASSIVE_ARTICLES:
+            return [self._game_passive_article(g, upcoming=u) for g, u in combined]
+
+        articles: List[Dict[str, str]] = []
+        reserve = 1
+        limit = MAX_PASSIVE_ARTICLES - reserve
+        for g, u in combined[:limit]:
+            articles.append(self._game_passive_article(g, upcoming=u))
+        rest = len(combined) - limit
+        articles.append({
+            "title": f"📋 还有 {rest} 款游戏",
+            "description": (
+                f"单次消息最多展示 {limit} 款，另有 {rest} 款未列出。\n\n"
+                f"🔗 Epic 免费页完整链接：\n{EPIC_FREE_STORE_ZH}"
+            )[:WECHAT_ARTICLE_DESC_MAX],
+            "image": DEFAULT_GAME_COVER_URL,
+            "url": EPIC_FREE_STORE_ZH,
+        })
+        return articles
+
     def _get_current_games_message(self) -> Union[str, Dict[str, Any]]:
-        """获取当前免费游戏消息
-        
-        策略：
-        - 被动回复纯文本消息（展示所有游戏信息+链接），确保所有游戏都能完整展示
-        - 后台尝试用客服消息逐条发送图文消息（带图片），如果 AppSecret 有效则用户额外收到图文
-        """
+        """返回游戏展示网页链接，用户点击可查看聚合了图片和文本的游戏页面"""
         games = self._get_active_games()
         upcoming_games = self._get_upcoming_games()
 
+        logger.info(f"游戏查询: 当前免费游戏数量={len(games)}, 即将免费游戏数量={len(upcoming_games)}")
+
+        if games:
+            for i, game in enumerate(games):
+                logger.info(f"  当前免费游戏 {i+1}: {game.get('name')} (开始: {game.get('start_time')}, 结束: {game.get('end_time')})")
+        if upcoming_games:
+            for i, game in enumerate(upcoming_games):
+                logger.info(f"  即将免费游戏 {i+1}: {game.get('name')} (开始: {game.get('start_time')})")
+
         if not games and not upcoming_games:
-            return "当前没有免费游戏信息。"
+            logger.warning("没有找到任何游戏数据")
+            return "当前没有免费游戏信息。\n\n回复'刷新'更新游戏数据。"
 
-        # 构建纯文本消息（被动回复，确保可靠展示所有游戏）
-        text_msg = self._build_games_text(games, upcoming_games)
-
-        # 构建图文列表（后台客服消息发送，带图片）
-        all_articles = []
-        for game in games:
-            time_info = ""
-            start_time_str = game.get("start_time")
-            end_time_str = game.get("end_time")
-            if start_time_str and end_time_str:
-                try:
-                    start_time = datetime.fromisoformat(start_time_str.replace("Z", "+00:00"))
-                    end_time = datetime.fromisoformat(end_time_str.replace("Z", "+00:00"))
-                    time_info = f"\n免费时间：{_format_time(start_time)} ~ {_format_time(end_time)}"
-                except Exception:
-                    pass
-            all_articles.append({
-                "title": f"🎮 {game.get('name', '未知游戏')}",
-                "description": f"🔥 正在免费领取！{time_info}\n\n回复'领取'让我们帮您领取游戏。",
-                "url": game.get("link", "https://store.epicgames.com/en-US/free-games"),
-                "image": game.get("image_url", ""),
-            })
-
-        for game in upcoming_games:
-            time_info = ""
-            start_time_str = game.get("start_time")
-            end_time_str = game.get("end_time")
-            if start_time_str:
-                try:
-                    start_time = datetime.fromisoformat(start_time_str.replace("Z", "+00:00"))
-                    time_info = f"\n开始时间：{_format_time(start_time)}"
-                    if end_time_str:
-                        end_time = datetime.fromisoformat(end_time_str.replace("Z", "+00:00"))
-                        time_info += f" ~ {_format_time(end_time)}"
-                except Exception:
-                    pass
-            all_articles.append({
-                "title": f"🔜 {game.get('name', '未知游戏')}",
-                "description": f"📅 即将免费！{time_info}\n\n敬请期待！",
-                "url": game.get("link", "https://store.epicgames.com/en-US/free-games"),
-                "image": game.get("image_url", ""),
-            })
-
-        # 返回带后台发送信息的结果
-        return {"type": "text_with_articles", "text": text_msg, "articles_to_send": all_articles}
+        # 构建游戏展示网页链接
+        from app.core.config import get_settings
+        settings = get_settings()
+        
+        # 使用域名或IP构建链接
+        base_url = settings.WECHAT_OFFICIAL_URL or "http://yxbot.online"
+        games_view_url = f"{base_url}/games/view"
+        
+        # 返回图文消息，引导用户点击链接查看网页
+        articles = [{
+            "title": f"🎮 本周 {len(games)} 款 Epic 免费游戏",
+            "description": f"点击查看本周 {len(games)} 款免费游戏和 {len(upcoming_games)} 款下周预告的详细信息\n\n包含游戏封面、领取时间和直达链接",
+            "image": games[0].get("image_url") if games else DEFAULT_GAME_COVER_URL,
+            "url": games_view_url
+        }]
+        
+        logger.info(f"生成游戏展示网页链接: {games_view_url}")
+        return {"type": "articles", "articles": articles}
 
     def _get_upcoming_games_message(self) -> Union[str, Dict[str, Any]]:
-        """获取即将免费游戏消息"""
         games = self._get_upcoming_games()
         if not games:
             return "暂无即将免费的游戏信息。"
 
-        # 纯文本消息
-        text_msg = self._build_upcoming_text(games)
-
-        # 图文列表
-        articles = []
-        for game in games:
-            time_info = ""
-            start_time_str = game.get("start_time")
-            end_time_str = game.get("end_time")
-            if start_time_str:
-                try:
-                    start_time = datetime.fromisoformat(start_time_str.replace("Z", "+00:00"))
-                    time_info = f"\n开始时间：{_format_time(start_time)}"
-                    if end_time_str:
-                        end_time = datetime.fromisoformat(end_time_str.replace("Z", "+00:00"))
-                        time_info += f" ~ {_format_time(end_time)}"
-                except Exception:
-                    pass
+        combined = [(g, True) for g in games]
+        if len(combined) <= MAX_PASSIVE_ARTICLES:
+            articles = [self._game_passive_article(g, upcoming=True) for g in games]
+        else:
+            articles = []
+            limit = MAX_PASSIVE_ARTICLES - 1
+            for g in games[:limit]:
+                articles.append(self._game_passive_article(g, upcoming=True))
+            rest = len(games) - limit
             articles.append({
-                "title": f"🔜 {game.get('name', '未知游戏')}",
-                "description": f"📅 即将免费！{time_info}\n\n敬请期待！",
-                "url": game.get("link", "https://store.epicgames.com/en-US/free-games"),
-                "image": game.get("image_url", ""),
+                "title": f"📋 还有 {rest} 款预告",
+                "description": (
+                    f"另有 {rest} 款即将免费未列出。\n\n"
+                    f"🔗 Epic 免费页完整链接：\n{EPIC_FREE_STORE_ZH}"
+                )[:WECHAT_ARTICLE_DESC_MAX],
+                "image": DEFAULT_GAME_COVER_URL,
+                "url": EPIC_FREE_STORE_ZH,
             })
-
-        return {"type": "text_with_articles", "text": text_msg, "articles_to_send": articles}
-
-    def _build_games_text(self, games: List[Dict], upcoming_games: List[Dict]) -> str:
-        """构建所有游戏的纯文本消息（降级方案）"""
-        lines = []
-        if games:
-            lines.append("🎮 当前免费游戏：")
-            for i, game in enumerate(games, 1):
-                time_info = ""
-                start_time_str = game.get("start_time")
-                end_time_str = game.get("end_time")
-                if start_time_str and end_time_str:
-                    try:
-                        start_time = datetime.fromisoformat(start_time_str.replace("Z", "+00:00"))
-                        end_time = datetime.fromisoformat(end_time_str.replace("Z", "+00:00"))
-                        time_info = f"（{_format_time(start_time)} ~ {_format_time(end_time)}）"
-                    except Exception:
-                        pass
-                link = game.get("link", "")
-                lines.append(f"🔥 {i}. {game.get('name', '未知游戏')} {time_info}")
-                if link:
-                    lines.append(f"🔗 {link}")
-            lines.append("")
-
-        if upcoming_games:
-            lines.append("🔜 即将免费：")
-            for i, game in enumerate(upcoming_games, 1):
-                time_info = ""
-                start_time_str = game.get("start_time")
-                if start_time_str:
-                    try:
-                        start_time = datetime.fromisoformat(start_time_str.replace("Z", "+00:00"))
-                        time_info = f"（开始：{_format_time(start_time)}）"
-                    except Exception:
-                        pass
-                link = game.get("link", "")
-                lines.append(f"📅 {i}. {game.get('name', '未知游戏')} {time_info}")
-                if link:
-                    lines.append(f"🔗 {link}")
-            lines.append("")
-        
-        lines.append("回复'领取'让我们帮您领取游戏。")
-        return "\n".join(lines)
-
-    def _build_upcoming_text(self, games: List[Dict]) -> str:
-        """构建即将免费游戏的纯文本消息"""
-        lines = ["🔜 即将免费的游戏："]
-        for i, game in enumerate(games, 1):
-            time_info = ""
-            start_time_str = game.get("start_time")
-            if start_time_str:
-                try:
-                    start_time = datetime.fromisoformat(start_time_str.replace("Z", "+00:00"))
-                    time_info = f"（开始：{_format_time(start_time)}）"
-                except Exception:
-                    pass
-            link = game.get("link", "")
-            lines.append(f"📅 {i}. {game.get('name', '未知游戏')} {time_info}")
-            if link:
-                lines.append(f"🔗 {link}")
-        lines.append("")
-        lines.append("敬请期待！")
-        return "\n".join(lines)
+        return {"type": "articles", "articles": articles}
 
     def _handle_refresh_games(self) -> str:
         """处理刷新游戏请求"""
@@ -672,8 +746,8 @@ class WeChatService:
         return """📖 可用命令：
 
 🎮 游戏相关：
-• 游戏 - 查看当前免费游戏（带图片）
-• 下周游戏 - 查看即将免费游戏
+• 游戏 - 图文查看当前免费与预告（图片+链接）
+• 下周游戏 - 图文查看即将免费游戏
 • 刷新 - 刷新游戏数据
 
 🎁 领取相关：
@@ -686,26 +760,13 @@ class WeChatService:
 • 帮助 - 查看此帮助信息
 • 取消 - 取消当前操作
 
-💡 绑定说明：发送'绑定'后会收到一个授权链接，在浏览器中登录 Epic 即可完成绑定。"""
+💡 绑定说明：发送「绑定」后打开链接在浏览器登录 Epic；成功后会收到提示，也可回复「完成」。"""
 
     # ==================== XML 响应生成 ====================
 
     def generate_xml_response(self, reply_content: Union[str, Dict[str, Any]], msg: BaseMessage, openid: str = "") -> str:
         if reply_content == "success":
             return "success"
-
-        # 文本+后台图文消息：被动回复文本，后台客服消息发图文
-        if isinstance(reply_content, dict) and reply_content.get("type") == "text_with_articles":
-            text = reply_content["text"]
-            articles_to_send = reply_content.get("articles_to_send", [])
-            
-            # 后台发送图文消息
-            if articles_to_send and openid:
-                self._send_articles_async(openid, articles_to_send)
-            
-            # 被动回复纯文本消息
-            reply = create_reply(text, msg)
-            return reply.render()
 
         # 支持图文消息（带图片的游戏查询结果）
         if isinstance(reply_content, dict) and reply_content.get("type") == "articles":
@@ -717,22 +778,3 @@ class WeChatService:
 
         reply = create_reply(reply_content, msg)
         return reply.render()
-
-    def _send_articles_async(self, openid: str, articles: List[Dict]):
-        """后台线程通过客服消息逐条发送图文消息"""
-        def send():
-            from app.services.wechat.push_sender import WeChatOfficialPusher
-            pusher = WeChatOfficialPusher()
-            
-            for article in articles:
-                try:
-                    result = pusher.send_news_message(openid, [article])
-                    if result.get("success"):
-                        logger.info(f"Sent article via customer service: {article.get('title', '')}")
-                    else:
-                        logger.warning(f"Failed to send article: {result}")
-                except Exception as e:
-                    logger.error(f"Failed to send article via customer service: {e}")
-
-        thread = threading.Thread(target=send, daemon=True)
-        thread.start()

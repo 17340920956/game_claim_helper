@@ -69,9 +69,23 @@ class WeChatOfficialPusher(BasePusher):
         game: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        发送游戏通知（使用文本消息）
+        发送游戏通知（使用图文消息）
         """
-        message = f"""Epic 本周免费游戏上线啦！
+        try:
+            # 使用图文消息发送，包含图片、标题、描述和链接
+            articles = [{
+                "title": f"🎮 {game.get('name', '未知游戏')}",
+                "description": f"免费领取时间：\n{_local_time(game.get('start_time'))} 至 {_local_time(game.get('end_time'))}\n\n点击查看详情并领取游戏",
+                "url": game.get('link') or 'https://store.epicgames.com/zh-CN/free-games',
+                "image": game.get('image_url') or 'https://via.placeholder.com/800x400?text=Free+Game'
+            }]
+            
+            result = self.send_news_message(contact_id, articles)
+            
+            # 如果图文消息发送失败，降级为文本消息
+            if not result.get("success"):
+                logger.warning(f"Failed to send news message, fallback to text: {result.get('error')}")
+                message = f"""Epic 本周免费游戏上线啦！
 
 游戏名称：{game.get('name', '未知')}
 游戏图片：{game.get('image_url') or '暂无'}
@@ -80,8 +94,12 @@ class WeChatOfficialPusher(BasePusher):
 结束时间：{_local_time(game.get('end_time'))}
 
 请点击链接领取游戏，或回复"领取"让我们帮您领取。"""
-        
-        return self.send_message(contact_id, message)
+                return self.send_message(contact_id, message)
+            
+            return result
+        except Exception as e:
+            logger.error(f"Failed to send game notification: {e}")
+            return {"success": False, "error": str(e)}
 
     def send_games_batch_notification(
         self,
@@ -89,23 +107,15 @@ class WeChatOfficialPusher(BasePusher):
         games: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """
-        批量发送游戏通知（多款游戏）
+        批量发送游戏通知（多款游戏） - 修改为逐个推送
         """
-        if len(games) == 1:
-            return self.send_game_notification(contact_id, games[0])
+        results = []
+        for game in games:
+            result = self.send_game_notification(contact_id, game)
+            results.append(result)
         
-        lines = ["Epic 本周多款免费游戏上线！\n"]
-        for i, game in enumerate(games, 1):
-            lines.append(f"{i}. {game.get('name', '未知')}")
-            lines.append(f"   图片：{game.get('image_url') or '暂无'}")
-            lines.append(f"   链接：{game.get('link') or '暂无'}")
-            lines.append(f"   时间：{_local_time(game.get('start_time'))} ~ {_local_time(game.get('end_time'))}")
-            lines.append("")
-        
-        lines.append('请点击链接领取游戏，或回复"领取"让我们帮您领取。')
-        message = "\n".join(lines)
-        
-        return self.send_message(contact_id, message)
+        # 返回最后一个推送结果
+        return results[-1] if results else {"success": False, "error": "No games to push"}
 
     def send_image_message(
         self, 

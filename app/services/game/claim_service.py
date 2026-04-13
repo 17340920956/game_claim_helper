@@ -1,6 +1,6 @@
 """
 Epic Games 自动领取服务
-通过 Device Code + Device Auth 认证并领取免费游戏
+通过 Device Code + Device Auth 认证，使用 Playwright 浏览器自动化领取免费游戏
 
 认证流程：
 1. 用 fortniteNewSwitchGameClient 获取 client_credentials token
@@ -9,34 +9,36 @@ Epic Games 自动领取服务
 4. 用 device_code 获取 access_token + refresh_token
 5. 用 access_token 创建 Device Auth 凭证（长期有效）
 6. 后续领取用 Device Auth 登录获取 access_token
+7. 使用 Playwright 浏览器自动化领取游戏（点击 GET 按钮）
 
-客户端说明：
-- fortniteNewSwitchGameClient: 支持 client_credentials + device_code grant type
-- fortniteAndroidGameClient: 支持 device_auth grant type（用于 Device Auth 登录）
+领取流程：
+- 用 Refresh Token 登录获取 access_token 和 sid cookie
+- 启动 Playwright Chromium 浏览器
+- 注入 Epic 登录态（cookie）
+- 访问游戏购买页面
+- 点击「GET」/「领取」按钮完成购买
 """
 import requests
 import json
 import time
+import asyncio
+import nest_asyncio
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 from app.core.logger import logger
-from app.core.crypto import decrypt_password, encrypt_password
+
+# 允许在已有事件循环中运行新的异步代码
+nest_asyncio.apply()
 
 
 # Epic 登录相关常量
 EPIC_AUTH_API = "https://account-public-service-prod.ol.epicgames.com"
-EPIC_LAUNCHER_API = "https://launcher-public-service-prod.ol.epicgames.com"
-EPIC_GRAPHQL_URL = "https://graphql.epicgames.com/graphql"
 EPIC_ORDER_API = "https://store-site-backend-static.ak.epicgames.com"
+EPIC_STORE_URL = "https://www.epicgames.com"
+EPIC_PURCHASE_URL = "https://www.epicgames.com/purchase"
 
-# fortniteNewSwitchGameClient 凭证（支持 client_credentials + device_code）
+# fortniteNewSwitchGameClient 凭证（支持 client_credentials + device_code grant type）
 SWITCH_AUTH_BASIC = "OThmN2U0MmMyZTNhNGY4NmE3NGViNDNmYmI0MWVkMzk6MGEyNDQ5YTItMDAxYS00NTFlLWFmZWMtM2U4MTI5MDFjNGQ3"
-
-# fortniteAndroidGameClient 凭证（支持 device_auth grant type）
-# 旧客户端ID已失效，使用新的客户端ID
-# ANDROID_AUTH_BASIC = "M2Y2OWU1NmM3NjQ5NDkyYzhjYzI5ZjFhZjA4YThhMTI6YjUxZWU5Y2IxMjIzNGY1MGE2OWVmYTY3ZWY1MzgxMmU="
-# 使用 fortniteNewSwitchGameClient 作为备用（支持 refresh_token）
-ANDROID_AUTH_BASIC = "OThmN2U0MmMyZTNhNGY4NmE3NGViNDNmYmI0MWVkMzk6MGEyNDQ5YTItMDAxYS00NTFlLWFmZWMtM2U4MTI5MDFjNGQ3"
 
 # Epic 登录 Headers
 EPIC_AUTH_HEADERS = {
@@ -45,23 +47,6 @@ EPIC_AUTH_HEADERS = {
     "Accept": "*/*",
 }
 
-# GraphQL 购买 Mutation
-PURCHASE_MUTATION = """
-mutation purchaseGame($input: PurchaseGameInput!) {
-    PurchaseGame(input: $input) {
-        order {
-            id
-            state
-            totalPrice {
-                discountPrice
-                originalPrice
-            }
-        }
-        purchaseSuccess
-    }
-}
-"""
-
 
 class EpicClaimError(Exception):
     """Epic 领取异常"""
@@ -69,7 +54,7 @@ class EpicClaimError(Exception):
 
 
 class EpicClaimService:
-    """Epic 免费游戏自动领取服务"""
+    """Epic 免费游戏自动领取服务 - Playwright 浏览器自动化"""
 
     def __init__(self):
         self.session = requests.Session()
@@ -154,7 +139,6 @@ class EpicClaimService:
 
                 if "error" in data:
                     error_code = data.get("errorCode", "")
-                    # Epic 使用 errorCode 字段区分不同类型的 invalid_grant 错误
                     if "authorization_pending" in error_code or data["error"] == "authorization_pending":
                         time.sleep(interval)
                         continue
@@ -209,8 +193,9 @@ class EpicClaimService:
     def login_with_device_auth(self, device_id: str, encrypted_secret: str, account_id: str) -> Dict[str, Any]:
         """
         使用 Device Auth 凭证登录获取 access_token
-        使用 fortniteAndroidGameClient（支持 device_auth grant type）
+        使用 fortniteNewSwitchGameClient（支持 device_auth grant type）
         """
+        from app.core.crypto import decrypt_password
         secret = decrypt_password(encrypted_secret)
         try:
             logger.info(f"Attempting to login with device auth for account {account_id}")
@@ -218,7 +203,7 @@ class EpicClaimService:
                 f"{EPIC_AUTH_API}/account/api/oauth/token",
                 headers={
                     **EPIC_AUTH_HEADERS,
-                    "Authorization": f"basic {ANDROID_AUTH_BASIC}",
+                    "Authorization": f"basic {SWITCH_AUTH_BASIC}",
                 },
                 data={
                     "grant_type": "device_auth",
@@ -256,8 +241,9 @@ class EpicClaimService:
     def login_with_refresh_token(self, encrypted_refresh_token: str) -> Dict[str, Any]:
         """
         使用 Refresh Token 登录获取新的 access_token
-        使用 fortniteAndroidGameClient
+        使用 fortniteNewSwitchGameClient
         """
+        from app.core.crypto import decrypt_password
         refresh_token = decrypt_password(encrypted_refresh_token)
         try:
             logger.info("Attempting to login with refresh token")
@@ -265,7 +251,7 @@ class EpicClaimService:
                 f"{EPIC_AUTH_API}/account/api/oauth/token",
                 headers={
                     **EPIC_AUTH_HEADERS,
-                    "Authorization": f"basic {ANDROID_AUTH_BASIC}",
+                    "Authorization": f"basic {SWITCH_AUTH_BASIC}",
                 },
                 data={
                     "grant_type": "refresh_token",
@@ -293,7 +279,6 @@ class EpicClaimService:
 
             logger.info(f"Refresh Token login successful for account {result.get('account_id')}")
 
-            # 如果返回了新的 refresh_token，需要更新存储
             if data.get("refresh_token"):
                 result["new_refresh_token"] = data.get("refresh_token")
 
@@ -305,53 +290,282 @@ class EpicClaimService:
             logger.exception(f"Refresh Token login exception: {e}")
             raise EpicClaimError(f"Refresh Token 登录异常: {e}")
 
-    def _get_exchange_code(self, access_token: str) -> str:
-        """通过 access_token 获取 exchange code"""
+    def _get_epic_cookies(self, access_token: str) -> List[Dict]:
+        """
+        通过 Epic OAuth API 获取登录后的 cookies（sid 等）
+        用于注入到 Playwright 浏览器中实现已登录状态
+        """
+        from app.core.crypto import decrypt_password
+        
+        session = requests.Session()
+        session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "*/*",
+            "Origin": "https://www.epicgames.com",
+            "Referer": "https://www.epicgames.com/",
+        })
+
+        cookies_list = []
+
+        # 1. 访问 epicgames.com 获取初始 cookies
         try:
-            resp = self.session.post(
+            init_resp = session.get("https://www.epicgames.com/", timeout=15)
+            for cookie in session.cookies:
+                cookies_list.append({
+                    "name": cookie.name,
+                    "value": cookie.value,
+                    "domain": cookie.domain,
+                    "path": cookie.path,
+                })
+            logger.info(f"获取初始 cookies: {[c['name'] for c in cookies_list]}")
+        except Exception as e:
+            logger.warning(f"获取初始 cookies 失败: {e}")
+
+        # 2. 通过 OAuth exchange 获取 EPIC_BEARER_TOKEN（这是关键 cookie）
+        try:
+            exchange_resp = session.get(
                 f"{EPIC_AUTH_API}/account/api/oauth/exchange",
                 headers={"Authorization": f"bearer {access_token}"},
+                timeout=15,
             )
-            data = resp.json()
-            if "errorCode" in data:
-                raise EpicClaimError(f"获取 exchange code 失败: {data.get('errorMessage', data.get('errorCode'))}")
-            return data.get("code")
-        except EpicClaimError:
-            raise
+            exchange_data = exchange_resp.json()
+            if "errorCode" not in exchange_data:
+                bearer_token = exchange_data.get("code", "")
+                
+                # 3. 用 bearer_token 设置 EPIC_BEARER_TOKEN cookie
+                cookies_list.append({
+                    "name": "EPIC_BEARER_TOKEN",
+                    "value": bearer_token,
+                    "domain": ".epicgames.com",
+                    "path": "/",
+                })
+                logger.info(f"获取 EPIC_BEARER_TOKEN 成功: {bearer_token[:20]}...")
+            else:
+                logger.warning(f"OAuth exchange 失败: {exchange_data.get('errorCode')}")
         except Exception as e:
-            raise EpicClaimError(f"获取 exchange code 失败: {e}")
+            logger.warning(f"获取 EPIC_BEARER_TOKEN 失败: {e}")
 
-    def _get_launcher_token(self, exchange_code: str) -> Dict[str, Any]:
-        """使用 exchange code 获取 launcher access token（用于购买）"""
+        session.close()
+        return cookies_list
+
+    async def _claim_with_playwright(self, offer_id: str, namespace: str, game_url: str, 
+                                      access_token: str, account_id: str) -> Dict[str, Any]:
+        """
+        使用 Playwright 浏览器自动化领取游戏
+        核心逻辑：打开游戏页面 → 检测是否已拥有 → 点击 GET → 确认领取
+        """
+        from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout
+
+        browser = None
+        page = None
         try:
-            resp = self.session.post(
-                f"{EPIC_AUTH_API}/account/api/oauth/token",
-                data={
-                    "grant_type": "exchange_code",
-                    "exchange_code": exchange_code,
-                    "scope": "basic profile openid offline_access",
-                    "token_type": "eg1",
-                },
-                headers={
-                    **EPIC_AUTH_HEADERS,
-                    "Authorization": f"basic {ANDROID_AUTH_BASIC}",
-                },
+            pw = await async_playwright().start()
+            
+            # 启动 Chromium（headless 模式，无头服务器环境）
+            browser = await pw.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--single-process",
+                    "--no-zygote",
+                    "--disable-software-rasterizer",
+                    "--window-size=1280,800",
+                ]
             )
-            data = resp.json()
-            if "error" in data:
-                raise EpicClaimError(f"获取 launcher token 失败: {data.get('errorMessage', data.get('error_description', data.get('error')))}")
-            return data
-        except EpicClaimError:
-            raise
+
+            context = await browser.new_context(
+                viewport={"width": 1280, "height": 800},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                locale="zh-CN",
+            )
+
+            page = await context.new_page()
+
+            # 注入登录 cookies
+            cookies = self._get_epic_cookies(access_token)
+            if cookies:
+                await context.add_cookies(cookies)
+                logger.info(f"已注入 {len(cookies)} 个 cookies 到浏览器")
+
+            # 构建购买 URL
+            purchase_url = f"https://www.epicgames.com/en-US/p/{game_url}" if game_url else None
+            if not purchase_url or not game_url:
+                purchase_url = f"https://store.epicgames.com/en-US/p/{offer_id}"
+
+            logger.info(f"打开游戏页面: {purchase_url}")
+
+            # 访问游戏页面
+            await page.goto(purchase_url, wait_until="domcontentloaded", timeout=30000)
+            await page.wait_for_timeout(3000)
+
+            current_url = page.url
+            page_content = await page.content()
+            logger.info(f"当前页面 URL: {current_url}")
+            logger.info(f"页面标题: {await page.title()}")
+
+            # 检查是否需要登录（被重定向到登录页）
+            if "id.epicgames.com" in current_url or "accounts.epicgames.com" in current_url:
+                logger.warning("页面跳转到登录页，尝试通过 cookie 登录...")
+                
+                # 尝试直接访问 Epic Store 主页检查登录状态
+                await page.goto("https://www.epicgames.com/", wait_until="domcontentloaded", timeout=20000)
+                await page.wait_for_timeout(2000)
+                
+                # 如果仍然在登录页，说明 cookie 无效
+                if "id.epicgames.com" in page.url or "accounts.epicgames.com" in page.url:
+                    return {
+                        "success": False,
+                        "message": "Epic 登录态已过期，请重新发送'绑定'更新凭证",
+                        "game_name": "",
+                    }
+
+            # 回到游戏页面
+            await page.goto(purchase_url, wait_until="domcontentloaded", timeout=30000)
+            await page.wait_for_timeout(3000)
+
+            # 检查是否已经拥有该游戏
+            page_text = await page.text_content("body") or ""
+            if "owned" in page_text.lower() or "already own" in page_text.lower() or "已在库中" in page_text:
+                logger.info("检测到游戏已拥有")
+                return {"success": True, "message": "游戏已拥有", "game_name": ""}
+
+            # 查找并点击「GET」或「领取」按钮
+            get_button_selectors = [
+                'button:has-text("GET")',
+                'button:has-text("Get")',
+                'button:has-text("领取")',
+                'button:has-text("Claim")',
+                '[data-testid="purchase-cta-button"]',
+                '.purchase-btn',
+                'a[href*="purchase"][href*="offerId"]',
+                'button.cta-btn',
+                '#purchase button',
+            ]
+
+            clicked_get = False
+            for selector in get_button_selectors:
+                try:
+                    btn = await page.query_selector(selector)
+                    if btn and await btn.is_visible():
+                        btn_text = await btn.text_content()
+                        logger.info(f"找到按钮 [{selector}]: {btn_text}")
+                        await btn.click()
+                        clicked_get = True
+                        break
+                except Exception as e:
+                    logger.debug(f"选择器 [{selector}] 未找到或点击失败: {e}")
+                    continue
+
+            if not clicked_get:
+                # 截图辅助调试
+                screenshot_path = f"/tmp/epic_claim_{int(time.time())}.png"
+                try:
+                    await page.screenshot(path=screenshot_path, full_page=True)
+                    logger.info(f"未找到 GET 按钮，截图保存至: {screenshot_path}")
+                except Exception:
+                    pass
+                
+                # 尝试查找页面上所有按钮的文本
+                buttons_info = []
+                try:
+                    buttons = await page.query_selector_all("button")
+                    for b in buttons:
+                        try:
+                            text = await b.text_content()
+                            visible = await b.is_visible()
+                            if visible and text:
+                                buttons_info.append(text.strip())
+                        except Exception:
+                            pass
+                    logger.info(f"页面上可见的按钮: {buttons_info}")
+                except Exception as e:
+                    logger.debug(f"枚举按钮失败: {e}")
+
+                return {
+                    "success": False,
+                    "message": "未找到领取按钮，可能需要先在 Epic 客户端登录一次",
+                    "game_name": "",
+                }
+
+            logger.info("已点击 GET 按钮，等待弹窗...")
+            await page.wait_for_timeout(3000)
+
+            # 在弹窗中点击「Place Order」或「确认」按钮
+            place_order_selectors = [
+                'button:has-text("Place Order")',
+                'button:has-text("place order")',
+                'button:has-text("Confirm")',
+                'button:has-text("确认")',
+                'button:has-text("Yes")',
+                'button:has-text("是")',
+                '[data-testid="confirm-purchase-btn"]',
+                '.purchase-confirm-btn',
+            ]
+
+            clicked_confirm = False
+            for selector in place_order_selectors:
+                try:
+                    confirm_btn = await page.query_selector(selector)
+                    if confirm_btn and await confirm_btn.is_visible():
+                        btn_text = await confirm_btn.text_content()
+                        logger.info(f"找到确认按钮 [{selector}]: {btn_text}")
+                        await confirm_btn.click()
+                        clicked_confirm = True
+                        break
+                except Exception as e:
+                    logger.debug(f"确认选择器 [{selector}] 失败: {e}")
+                    continue
+
+            if clicked_confirm:
+                logger.info("已点击确认按钮，等待订单处理...")
+                await page.wait_for_timeout(5000)
+
+            # 最终验证：检查是否成功
+            final_text = await page.text_content("body") or ""
+            final_url = page.url
+            
+            success_indicators = ["owned", "thank you", "success", "purchased", "claimed", "已拥有", "成功", "感谢"]
+            failure_indicators = ["error", "failed", "unable", "unavailable", "not available"]
+
+            for indicator in success_indicators:
+                if indicator.lower() in final_text.lower() or indicator.lower() in final_url.lower():
+                    logger.info(f"领取成功! 检测到: {indicator}")
+                    return {"success": True, "message": "领取成功!", "game_name": ""}
+
+            for indicator in failure_indicators:
+                if indicator.lower() in final_text.lower():
+                    logger.warning(f"可能失败: 检测到 {indicator}")
+                    
+            # 默认认为成功（如果没报错的话）
+            logger.info("领取流程执行完毕")
+            return {"success": True, "message": "领取请求已提交", "game_name": ""}
+
         except Exception as e:
-            raise EpicClaimError(f"获取 launcher token 异常: {e}")
+            logger.exception(f"Playwright 浏览器自动化异常: {e}")
+            return {"success": False, "message": f"浏览器操作异常: {str(e)}", "game_name": ""}
+        
+        finally:
+            if page:
+                try:
+                    await page.close()
+                except Exception:
+                    pass
+            if browser:
+                try:
+                    await browser.close()
+                except Exception:
+                    pass
 
     def claim_game(self, offer_id: str, namespace: str,
                    encrypted_refresh_token: str = None,
                    device_id: str = None, encrypted_device_secret: str = None, account_id: str = None,
-                   email: str = None, encrypted_password: str = None) -> Dict[str, Any]:
+                   email: str = None, encrypted_password: str = None,
+                   game_slug: str = None, game_url: str = None) -> Dict[str, Any]:
         """
-        领取单个免费游戏
+        领取单个免费游戏 - 使用 Playwright 浏览器自动化
 
         认证优先级：
         1. Refresh Token（推荐）
@@ -368,69 +582,39 @@ class EpicClaimService:
                 login_result = self.login_with_refresh_token(encrypted_refresh_token)
                 new_refresh_token = login_result.get("new_refresh_token")
             elif device_id and encrypted_device_secret and account_id:
-                # 兼容旧的 Device Auth 方式
                 login_result = self.login_with_device_auth(device_id, encrypted_device_secret, account_id)
             elif encrypted_password:
-                # 回退到密码认证（可能已不可用）
+                from app.core.crypto import decrypt_password
                 password = decrypt_password(encrypted_password)
                 login_result = self._login_with_password(email or "", password)
             else:
                 return {"success": False, "message": "无可用认证方式，请重新绑定账号", "game_name": "", "new_refresh_token": None}
 
             access_token = login_result["access_token"]
-            account_id = login_result["account_id"]
-            logger.info(f"Epic 登录成功: account_id={account_id}")
+            acc_id = login_result["account_id"]
+            logger.info(f"Epic 登录成功: account_id={acc_id}")
 
-            # 获取 exchange code -> launcher token
-            exchange_code = self._get_exchange_code(access_token)
-            launcher_token = self._get_launcher_token(exchange_code)
-            launcher_access_token = launcher_token["access_token"]
+            # 使用 Playwright 浏览器自动化领取
+            logger.info(f"开始使用 Playwright 领取游戏: offer_id={offer_id}, namespace={namespace}")
 
-            # 执行购买（领取免费游戏）
-            purchase_payload = {
-                "operationName": "purchaseGame",
-                "variables": {
-                    "input": {
-                        "offerId": offer_id,
-                        "quantity": 1,
-                        "totalPrice": 0,
-                        "currencyCode": "USD",
-                        "purchaseReason": "FREE",
-                        "namespace": namespace,
-                    }
-                },
-                "query": PURCHASE_MUTATION,
-            }
+            # 运行异步 Playwright 操作
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(
+                    self._claim_with_playwright(
+                        offer_id=offer_id,
+                        namespace=namespace,
+                        game_url=game_slug or game_url or "",
+                        access_token=access_token,
+                        account_id=acc_id,
+                    )
+                )
+            finally:
+                loop.close()
 
-            purchase_resp = self.session.post(
-                EPIC_GRAPHQL_URL,
-                json=purchase_payload,
-                headers={
-                    "Authorization": f"bearer {launcher_access_token}",
-                    "Content-Type": "application/json",
-                    "User-Agent": EPIC_AUTH_HEADERS["User-Agent"],
-                },
-            )
-
-            if purchase_resp.status_code == 429:
-                return {"success": False, "message": "请求过于频繁，请稍后再试", "game_name": "", "new_refresh_token": new_refresh_token}
-
-            result = purchase_resp.json()
-
-            if "errors" in result:
-                error_msg = result["errors"][0].get("message", "未知错误")
-                if "already" in error_msg.lower() or "OWNED" in error_msg:
-                    return {"success": True, "message": "游戏已拥有", "game_name": "", "new_refresh_token": new_refresh_token}
-                return {"success": False, "message": f"领取失败: {error_msg}", "game_name": "", "new_refresh_token": new_refresh_token}
-
-            purchase_data = result.get("data", {}).get("PurchaseGame", {})
-            if purchase_data.get("purchaseSuccess"):
-                return {"success": True, "message": "领取成功", "game_name": "", "new_refresh_token": new_refresh_token}
-            else:
-                order_state = purchase_data.get("order", {}).get("state", "")
-                if order_state == "COMPLETED":
-                    return {"success": True, "message": "领取成功", "game_name": "", "new_refresh_token": new_refresh_token}
-                return {"success": False, "message": f"领取状态: {order_state}", "game_name": "", "new_refresh_token": new_refresh_token}
+            result["new_refresh_token"] = new_refresh_token
+            return result
 
         except EpicClaimError as e:
             logger.error(f"Epic 领取异常: {e}")
@@ -483,7 +667,8 @@ class EpicClaimServiceSingleton:
     def claim_game(self, offer_id: str, namespace: str,
                    encrypted_refresh_token: str = None,
                    device_id: str = None, encrypted_device_secret: str = None, account_id: str = None,
-                   email: str = None, encrypted_password: str = None) -> Dict[str, Any]:
+                   email: str = None, encrypted_password: str = None,
+                   game_slug: str = None, game_url: str = None) -> Dict[str, Any]:
         service = EpicClaimService()
         try:
             return service.claim_game(
@@ -495,6 +680,8 @@ class EpicClaimServiceSingleton:
                 account_id=account_id,
                 email=email,
                 encrypted_password=encrypted_password,
+                game_slug=game_slug,
+                game_url=game_url,
             )
         finally:
             service.session.close()

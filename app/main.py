@@ -43,7 +43,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 注册路由模块
+# 注册路由模块 - 注意顺序，game_router 包含 /games/view 要在通配路由之前
 app.include_router(wechat_router)
 app.include_router(user_router)
 app.include_router(game_router)
@@ -57,23 +57,20 @@ def health_check():
     from datetime import datetime
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
-@app.get("/{filename}")
+@app.get("/MP_verify_{filename}.txt")
 async def serve_wechat_verify_file(filename: str):
     """
-    通用微信公众号域名归属权验证文件服务
-    自动匹配根目录下以 MP_verify_ 开头的 .txt 文件
+    微信公众号域名归属权验证文件服务
+    匹配根目录下以 MP_verify_ 开头的 .txt 文件
     """
-    from fastapi import HTTPException
-    if filename.startswith("MP_verify_") and filename.endswith(".txt"):
-        file_path = filename  # 假设文件在根目录
-        if os.path.exists(file_path):
-             with open(file_path, 'r') as f:
-                 content = f.read()
-             return PlainTextResponse(content)
-    
-    # 如果不匹配验证文件，抛出 404，由 FastAPI 继续处理或返回错误
+    file_path = f"MP_verify_{filename}.txt"
+    if os.path.exists(file_path):
+         with open(file_path, 'r') as f:
+             content = f.read()
+         return PlainTextResponse(content)
     raise HTTPException(status_code=404, detail="Not Found")
 
 if __name__ == "__main__":
     logger.info("Starting server...")
     uvicorn.run(app, host="0.0.0.0", port=8000)
+    

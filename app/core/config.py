@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     WECHAT_OFFICIAL_TOKEN: str = ""
     WECHAT_OFFICIAL_AES_KEY: str = ""
     WECHAT_OFFICIAL_TEMPLATE_ID: str = ""
+    WECHAT_OFFICIAL_URL: str = "http://localhost:8000"  # 公众号服务器URL，用于构建网页链接
     # WeChat Official API URLs
     # 稳定版凭证接口
     WECHAT_OFFICIAL_STABLE_TOKEN_URL: str = "https://api.weixin.qq.com/cgi-bin/stable_token"

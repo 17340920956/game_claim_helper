@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from typing import Optional
 from app.db.session import get_db
@@ -9,8 +10,12 @@ from app.schemas.game import GameResponse, GameListResponse
 from app.core.security import verify_admin_access
 from app.core.logger import logger
 from datetime import datetime
+import os
 
 router = APIRouter()
+
+# 设置模板目录
+templates = Jinja2Templates(directory="app/templates")
 
 
 def _build_game_response(game_dict: dict) -> GameResponse:
@@ -93,4 +98,43 @@ async def refresh_free_games():
         }
     except Exception as e:
         logger.error(f"刷新游戏数据失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/games/view")
+async def games_view_page(request: Request):
+    """
+    游戏展示网页 - 聚合本周免费游戏和下周预告
+    用于微信推送时展示游戏图片和详细信息
+    """
+    try:
+        # 从 Redis 获取游戏数据
+        current_games = redis_client.get_current_week_games()
+        upcoming_games = redis_client.get_next_week_games()
+        
+        # 格式化时间显示
+        def format_time(time_str):
+            if not time_str:
+                return None
+            try:
+                dt = datetime.fromisoformat(time_str.replace('Z', '+00:00'))
+                return dt.strftime('%m月%d日 %H:%M')
+            except:
+                return time_str
+        
+        # 处理游戏数据
+        for game in current_games:
+            game['end_time'] = format_time(game.get('end_time'))
+        
+        for game in upcoming_games:
+            game['start_time'] = format_time(game.get('start_time'))
+        
+        return templates.TemplateResponse("games.html", {
+            "request": request,
+            "current_games": current_games,
+            "upcoming_games": upcoming_games,
+            "update_time": datetime.now().strftime('%Y年%m月%d日 %H:%M')
+        })
+    except Exception as e:
+        logger.error(f"渲染游戏展示页面失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))

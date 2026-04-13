@@ -454,10 +454,26 @@ class EpicClaimService:
             except Exception as e:
                 logger.warning(f"等待超时: {e}")
 
-            current_url = page.url
-            page_content = await page.content()
-            logger.info(f"当前页面 URL: {current_url}")
-            logger.info(f"页面标题: {await page.title()}")
+            # 获取页面信息（添加错误保护）
+            try:
+                current_url = page.url
+                logger.info(f"当前页面 URL: {current_url}")
+            except Exception as e:
+                logger.warning(f"获取页面URL失败: {e}")
+                current_url = ""
+            
+            try:
+                page_title = await page.title()
+                logger.info(f"页面标题: {page_title}")
+            except Exception as e:
+                logger.warning(f"获取页面标题失败: {e}")
+                page_title = ""
+            
+            try:
+                page_content = await page.content()
+            except Exception as e:
+                logger.warning(f"获取页面内容失败: {e}")
+                page_content = ""
 
             # 检查是否需要登录（被重定向到登录页）
             if "id.epicgames.com" in current_url or "accounts.epicgames.com" in current_url:

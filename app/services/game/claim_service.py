@@ -397,15 +397,16 @@ class EpicClaimService:
                     "--disable-gpu",
                     "--disable-software-rasterizer",
                     "--window-size=1280,800",
-                    # 绕过 Cloudflare 检测
-                    "--disable-blink-features=AutomationControlled",
-                    "--disable-web-security",
-                    "--disable-features=IsolateOrigins,site-per-process",
-                    "--disable-site-isolation-trials",
-                    "--disable-features=BlockInsecurePrivateNetworkRequests",
-                    # 内存优化
-                    "--max_old_space_size=512",
-                    "--memory-pressure-off",
+                    # 稳定性优化
+                    "--disable-extensions",
+                    "--disable-plugins",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "--disable-background-timer-throttling",
+                    "--disable-renderer-backgrounding",
+                    "--disable-backgrounding-occluded-windows",
+                    "--disable-features=TranslateUI",
+                    "--disable-ipc-flooding-protection",
                 ]
             }
             
@@ -415,7 +416,7 @@ class EpicClaimService:
             else:
                 logger.warning("未找到浏览器可执行文件，尝试使用默认路径")
             
-            # 使用 browser_type 方式启动，避免 Playwright 自动查找 headless_shell
+            # 使用 browser_type 方式启动
             browser_type = pw.chromium
             browser = await browser_type.launch(**launch_options)
 
@@ -423,9 +424,6 @@ class EpicClaimService:
                 viewport={"width": 1280, "height": 800},
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 locale="zh-CN",
-                # 绕过检测
-                bypass_csp=True,
-                java_script_enabled=True,
             )
 
             page = await context.new_page()

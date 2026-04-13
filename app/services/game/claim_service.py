@@ -375,6 +375,19 @@ class EpicClaimService:
                     logger.info(f"使用 Chromium 可执行文件: {executable_path}")
                     break
             
+            # 如果找不到 chromium，尝试使用 chrome
+            if not executable_path:
+                chrome_paths = [
+                    "/usr/bin/google-chrome",
+                    "/usr/bin/chromium",
+                    "/usr/bin/chromium-browser",
+                ]
+                for path in chrome_paths:
+                    if os.path.exists(path):
+                        executable_path = path
+                        logger.info(f"使用系统 Chrome: {executable_path}")
+                        break
+            
             launch_options = {
                 "headless": True,
                 "args": [
@@ -391,6 +404,9 @@ class EpicClaimService:
             
             if executable_path:
                 launch_options["executable_path"] = executable_path
+                logger.info(f"启动浏览器，executable_path={executable_path}")
+            else:
+                logger.warning("未找到浏览器可执行文件，尝试使用默认路径")
             
             browser = await pw.chromium.launch(**launch_options)
 

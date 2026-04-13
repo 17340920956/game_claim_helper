@@ -395,10 +395,17 @@ class EpicClaimService:
                     "--disable-setuid-sandbox",
                     "--disable-dev-shm-usage",
                     "--disable-gpu",
-                    "--single-process",
-                    "--no-zygote",
                     "--disable-software-rasterizer",
                     "--window-size=1280,800",
+                    # 绕过 Cloudflare 检测
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-web-security",
+                    "--disable-features=IsolateOrigins,site-per-process",
+                    "--disable-site-isolation-trials",
+                    "--disable-features=BlockInsecurePrivateNetworkRequests",
+                    # 内存优化
+                    "--max_old_space_size=512",
+                    "--memory-pressure-off",
                 ]
             }
             
@@ -416,6 +423,9 @@ class EpicClaimService:
                 viewport={"width": 1280, "height": 800},
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 locale="zh-CN",
+                # 绕过检测
+                bypass_csp=True,
+                java_script_enabled=True,
             )
 
             page = await context.new_page()

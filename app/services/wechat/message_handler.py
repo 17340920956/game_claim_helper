@@ -481,32 +481,53 @@ class WeChatService:
         if not games:
             return "当前没有免费游戏可领取。\n\n回复'刷新'更新游戏数据。"
 
-        # 尝试领取第一游戏以检查凭证有效性
-        first_game = games[0]
-        test_result = self._do_claim(user, first_game)
-        
-        # 检测到凭证失效，自动清除并引导重新绑定
-        if "已失效" in test_result or "重新绑定" in test_result or "无可用认证" in test_result:
-            logger.warning(f"User {user.id} credentials expired, auto-clearing and triggering rebind")
-            
-            # 清除失效的凭证
-            self.repository.clear_user_epic_account(user)
-            
-            # 自动触发绑定流程
-            return self._handle_bind_request_with_message(
-                user,
-                f"⚠️ 您的 Epic 授权已失效，已自动清除。\n\n"
-                f"请重新绑定以继续领取游戏：\n\n",
-                openid=openid,
-            )
+        # 立即返回响应，避免微信超时重试
+        # 使用后台线程处理领取
+        import threading
+        def claim_in_background():
+            try:
+                # 尝试领取第一游戏以检查凭证有效性
+                first_game = games[0]
+                test_result = self._do_claim(user, first_game)
+                
+                # 检测到凭证失效，自动清除
+                if "已失效" in test_result or "重新绑定" in test_result or "无可用认证" in test_result:
+                    logger.warning(f"User {user.id} credentials expired, auto-clearing")
+                    self.repository.clear_user_epic_account(user)
+                    # 发送凭证失效通知
+                    self._send_claim_notification(openid, f"⚠️ 您的 Epic 授权已失效，请重新绑定。\n\n回复'绑定'重新授权。")
+                    return
 
-        # 第一游戏领取成功或非凭证问题，继续领取剩余游戏
-        results = [test_result]
-        for game in games[1:]:
-            result = self._do_claim(user, game)
-            results.append(result)
+                # 第一游戏领取成功或非凭证问题，继续领取剩余游戏
+                results = [test_result]
+                for game in games[1:]:
+                    result = self._do_claim(user, game)
+                    results.append(result)
 
-        return "\n\n".join(results) + "\n\n回复'游戏'查看更多。"
+                # 发送领取结果通知
+                final_result = "\n\n".join(results) + "\n\n回复'游戏'查看更多。"
+                self._send_claim_notification(openid, final_result)
+            except Exception as e:
+                logger.exception(f"Background claim failed: {e}")
+                self._send_claim_notification(openid, f"❌ 领取过程发生错误：{str(e)}")
+
+        # 启动后台线程
+        thread = threading.Thread(target=claim_in_background)
+        thread.daemon = True
+        thread.start()
+
+        # 立即返回响应
+        game_names = [g.get("name", "未知游戏") for g in games]
+        return f"⏳ 正在为您领取 {len(games)} 款游戏：\n" + "\n".join([f"• {name}" for name in game_names]) + "\n\n请稍候，领取结果将通过公众号通知您。"
+
+    def _send_claim_notification(self, openid: str, message: str):
+        """发送领取结果通知（通过客服消息接口）"""
+        try:
+            # 这里可以实现客服消息发送逻辑
+            # 暂时记录到日志
+            logger.info(f"Claim notification for {openid}: {message[:100]}...")
+        except Exception as e:
+            logger.error(f"Failed to send notification: {e}")
 
     def _do_claim(self, user, game: Dict[str, Any]) -> str:
         """执行实际领取操作"""

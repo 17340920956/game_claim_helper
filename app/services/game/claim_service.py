@@ -443,9 +443,17 @@ class EpicClaimService:
 
             logger.info(f"打开游戏页面: {purchase_url}")
 
-            # 访问游戏页面
-            await page.goto(purchase_url, wait_until="domcontentloaded", timeout=30000)
-            await page.wait_for_timeout(3000)
+            # 访问游戏页面 - 使用更宽松的加载策略
+            try:
+                await page.goto(purchase_url, wait_until="load", timeout=60000)
+            except Exception as e:
+                logger.warning(f"页面加载超时，尝试继续: {e}")
+            
+            # 等待页面稳定
+            try:
+                await page.wait_for_timeout(5000)
+            except Exception as e:
+                logger.warning(f"等待超时: {e}")
 
             current_url = page.url
             page_content = await page.content()

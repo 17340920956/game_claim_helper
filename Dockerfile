@@ -17,15 +17,20 @@ RUN apt-get update && apt-get install -y \
     wget gnupg ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
+# 设置pip超时和重试
+ENV PIP_DEFAULT_TIMEOUT=300
+ENV PIP_RETRY_COUNT=5
+
 # 复制依赖文件并安装依赖（使用国内镜像源）
 COPY requirements.txt .
-RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt || \
-    pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ -r requirements.txt || \
-    pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --timeout 300 --retries 5 -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt || \
+    pip install --no-cache-dir --timeout 300 --retries 5 -i https://mirrors.aliyun.com/pypi/simple/ -r requirements.txt || \
+    pip install --no-cache-dir --timeout 300 --retries 5 -r requirements.txt
 
 # 安装 Playwright 及 Chromium（使用国内镜像源）
 ENV PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
-RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple playwright || pip install --no-cache-dir playwright
+ENV PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright
+RUN pip install --no-cache-dir --timeout 300 -i https://pypi.tuna.tsinghua.edu.cn/simple playwright || pip install --no-cache-dir --timeout 300 playwright
 RUN playwright install chromium --with-deps || playwright install chromium
 
 # 复制项目文件

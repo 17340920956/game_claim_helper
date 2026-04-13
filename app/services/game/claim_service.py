@@ -408,7 +408,9 @@ class EpicClaimService:
             else:
                 logger.warning("未找到浏览器可执行文件，尝试使用默认路径")
             
-            browser = await pw.chromium.launch(**launch_options)
+            # 使用 browser_type 方式启动，避免 Playwright 自动查找 headless_shell
+            browser_type = pw.chromium
+            browser = await browser_type.launch(**launch_options)
 
             context = await browser.new_context(
                 viewport={"width": 1280, "height": 800},

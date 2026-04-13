@@ -17,9 +17,11 @@ RUN apt-get update && apt-get install -y \
     wget gnupg ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# 复制依赖文件并安装依赖
+# 复制依赖文件并安装依赖（使用国内镜像源）
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt || \
+    pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ -r requirements.txt || \
+    pip install --no-cache-dir -r requirements.txt
 
 # 安装 Playwright 及 Chromium
 RUN playwright install chromium --with-deps || true

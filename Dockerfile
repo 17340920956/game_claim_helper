@@ -27,17 +27,19 @@ RUN pip install --no-cache-dir --timeout 300 --retries 5 -i https://pypi.tuna.ts
     pip install --no-cache-dir --timeout 300 --retries 5 -i https://mirrors.aliyun.com/pypi/simple/ -r requirements.txt || \
     pip install --no-cache-dir --timeout 300 --retries 5 -r requirements.txt
 
-# 安装 Playwright 及 Chromium（使用国内镜像源）
+# 设置 Playwright 环境变量
 ENV PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
 ENV PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright
-RUN pip install --no-cache-dir --timeout 300 -i https://pypi.tuna.tsinghua.edu.cn/simple playwright || pip install --no-cache-dir --timeout 300 playwright
-RUN playwright install chromium --with-deps || playwright install chromium
 
 # 复制项目文件
 COPY . .
 
+# 创建浏览器安装脚本
+COPY install_browser.sh /tmp/install_browser.sh
+RUN chmod +x /tmp/install_browser.sh
+
 # 暴露端口
 EXPOSE 8000
 
-# 使用 Gunicorn 启动应用
-CMD ["gunicorn", "-c", "gunicorn_conf.py", "app.main:app"]
+# 使用启动脚本（先安装浏览器，再启动应用）
+CMD ["bash", "-c", "bash /tmp/install_browser.sh && gunicorn -c gunicorn_conf.py app.main:app"]

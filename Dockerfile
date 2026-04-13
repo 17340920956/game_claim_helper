@@ -35,8 +35,19 @@ ENV PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright
 COPY . .
 
 # 创建浏览器安装脚本
-COPY install_browser.sh /tmp/install_browser.sh
-RUN chmod +x /tmp/install_browser.sh
+RUN echo '#!/bin/bash\n\
+set -e\n\
+echo "=== 开始安装 Playwright 浏览器 ==="\n\
+export PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright\n\
+if [ -d "$PLAYWRIGHT_BROWSERS_PATH/chromium-"* ] && [ -f "$PLAYWRIGHT_BROWSERS_PATH/chromium-"*/chrome-linux/chrome ]; then\n\
+    echo "浏览器已安装，跳过安装步骤"\n\
+    ls -la $PLAYWRIGHT_BROWSERS_PATH/\n\
+    exit 0\n\
+fi\n\
+echo "安装 Chromium 浏览器..."\n\
+playwright install chromium\n\
+echo "=== 浏览器安装完成 ==="\n\
+ls -la $PLAYWRIGHT_BROWSERS_PATH/' > /tmp/install_browser.sh && chmod +x /tmp/install_browser.sh
 
 # 暴露端口
 EXPOSE 8000

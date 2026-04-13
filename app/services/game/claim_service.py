@@ -597,21 +597,19 @@ class EpicClaimService:
             # 使用 Playwright 浏览器自动化领取
             logger.info(f"开始使用 Playwright 领取游戏: offer_id={offer_id}, namespace={namespace}")
 
-            # 运行异步 Playwright 操作
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                result = loop.run_until_complete(
-                    self._claim_with_playwright(
-                        offer_id=offer_id,
-                        namespace=namespace,
-                        game_url=game_slug or game_url or "",
-                        access_token=access_token,
-                        account_id=acc_id,
-                    )
+            # 运行异步 Playwright 操作 - 使用 nest_asyncio 兼容已有事件循环
+            import nest_asyncio
+            nest_asyncio.apply()
+            
+            result = asyncio.get_event_loop().run_until_complete(
+                self._claim_with_playwright(
+                    offer_id=offer_id,
+                    namespace=namespace,
+                    game_url=game_slug or game_url or "",
+                    access_token=access_token,
+                    account_id=acc_id,
                 )
-            finally:
-                loop.close()
+            )
 
             result["new_refresh_token"] = new_refresh_token
             return result

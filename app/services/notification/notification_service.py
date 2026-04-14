@@ -1,7 +1,6 @@
 from typing import Dict, Any, Optional, List
 from app.services.wechat.push_sender import WeChatOfficialPusher
 from app.core.config import get_settings
-from app.models.base import User
 from datetime import datetime
 
 settings = get_settings()
@@ -35,7 +34,7 @@ class PushService:
     def __init__(self):
         self.wechat_official_pusher = WeChatOfficialPusher()
 
-    def _format_current_game_message(self, game: Dict[str, Any], user_id: Optional[int] = None) -> str:
+    def _format_current_game_message(self, game: Dict[str, Any]) -> str:
         """格式化本周免费游戏消息"""
         msg = f"""Epic 本周免费游戏上线啦！
 
@@ -45,7 +44,7 @@ class PushService:
 开始时间：{_local_time(game.get('start_time'))}
 结束时间：{_local_time(game.get('end_time'))}
 
-请回复"确认"表示已收到，或回复"领取"让我们帮您领取游戏。"""
+请访问 Epic 官网手动领取游戏。"""
         return msg
 
     def _format_next_week_message(self, games: List[Dict[str, Any]]) -> str:
@@ -55,49 +54,31 @@ class PushService:
         return f"""下周 Epic 免费游戏预告：
 {title_list}
 
-敬请期待！请回复"确认"表示已收到消息。"""
+敬请期待！"""
 
-    def push_to_user(self, user: User, message: str) -> Dict[str, Any]:
-        """底层推送接口：根据用户绑定的方式推送"""
-        if user.wx_id:
-            return self.wechat_official_pusher.send_message(user.wx_id, message)
-        else:
-            return {"success": False, "error": "用户未绑定微信"}
+    def push_to_openid(self, openid: str, message: str) -> Dict[str, Any]:
+        """底层推送接口：根据openid推送"""
+        return self.wechat_official_pusher.send_message(openid, message)
 
     def push_game_notification(
-        self, user: User, game: Dict[str, Any], is_next_week: bool = False
+        self, openid: str, game: Dict[str, Any], is_next_week: bool = False
     ) -> Dict[str, Any]:
         """推送单个游戏的通知"""
         if is_next_week:
             message = self._format_next_week_message([game])
-            return self.push_to_user(user, message)
+            return self.push_to_openid(openid, message)
         else:
-            if user.wx_id:
-                return self.wechat_official_pusher.send_game_notification(user.wx_id, game)
-            else:
-                return {"success": False, "error": "用户未绑定微信"}
+            return self.wechat_official_pusher.send_game_notification(openid, game)
 
     def push_games_batch(
-        self, user: User, games: List[Dict[str, Any]], is_next_week: bool = False
+        self, openid: str, games: List[Dict[str, Any]], is_next_week: bool = False
     ) -> Dict[str, Any]:
         """批量推送游戏通知"""
         if is_next_week:
             message = self._format_next_week_message(games)
-            return self.push_to_user(user, message)
+            return self.push_to_openid(openid, message)
         else:
-            if user.wx_id:
-                return self.wechat_official_pusher.send_games_batch_notification(user.wx_id, games)
-            else:
-                return {"success": False, "error": "用户未绑定微信"}
-
-    def push_news_notification(
-        self, user: User, articles: List[Dict[str, str]]
-    ) -> Dict[str, Any]:
-        """推送图文消息"""
-        if user.wx_id:
-            return self.wechat_official_pusher.send_news_message(user.wx_id, articles)
-        else:
-            return {"success": False, "error": "用户未绑定微信"}
+            return self.wechat_official_pusher.send_games_batch_notification(openid, games)
 
 
 push_service = PushService()

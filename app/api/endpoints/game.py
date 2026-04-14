@@ -1,16 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.templating import Jinja2Templates
-from sqlalchemy.orm import Session
 from typing import Optional
-from app.db.session import get_db
 from app.services.game.scraper_service import fetch_and_store_games
-from app.services.game.claim_service import epic_claim_service
 from app.db.redis import redis_client
 from app.schemas.game import GameResponse, GameListResponse
 from app.core.security import verify_admin_access
 from app.core.logger import logger
 from datetime import datetime
-import os
 
 router = APIRouter()
 
@@ -81,9 +77,9 @@ async def get_all_free_games(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/games/refresh", dependencies=[Depends(verify_admin_access)])
+@router.post("/games/refresh")
 async def refresh_free_games():
-    """手动刷新游戏数据（立即爬取最新游戏），需要管理员权限"""
+    """手动刷新游戏数据（立即爬取最新游戏）"""
     try:
         logger.info("手动触发游戏数据刷新")
         games = fetch_and_store_games()

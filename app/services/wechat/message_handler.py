@@ -173,9 +173,6 @@ class WeChatService:
             return self._get_upcoming_games_message()
         elif content_lower in ('刷新', '刷新游戏'):
             return self._handle_refresh_games()
-        elif content_lower in ('领取', '领取游戏'):
-            return "自动领取功能已下线。\n\n请访问 Epic 官网手动领取游戏：\nhttps://store.epicgames.com/zh-CN/free-games"
-
         return "收到您的消息！\n\n回复'帮助'查看可用命令。"
 
     # ==================== 游戏查询 ====================

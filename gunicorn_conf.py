@@ -17,7 +17,7 @@ loglevel = "info"
 # 进程名称
 proc_name = "game_claim_helper"
 
-# 超时设置 (增加到300秒，确保领取流程有足够时间完成)
+# 超时设置
 timeout = 300
 keepalive = 5
 

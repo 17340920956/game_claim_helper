@@ -141,7 +141,7 @@
             fill: currentColor;
         }
         
-        .claim-btn {
+        .game-link-btn {
             display: block;
             width: 100%;
             padding: 14px;
@@ -153,12 +153,12 @@
             font-weight: 600;
             transition: opacity 0.3s ease;
         }
-        
-        .claim-btn:hover {
+
+        .game-link-btn:hover {
             opacity: 0.9;
         }
-        
-        .claim-btn.upcoming {
+
+        .game-link-btn.upcoming {
             background: linear-gradient(90deg, #4ecca3, #44a08d);
             pointer-events: none;
         }
@@ -209,7 +209,7 @@
     <div class="container">
         <header>
             <h1>🎮 Epic 免费游戏</h1>
-            <p>每周更新，限时免费领取</p>
+            <p>每周更新，限时免费游戏</p>
         </header>
         
         <div class="update-time">
@@ -245,8 +245,8 @@
                             {% endif %}
                         </div>
                         
-                        <a href="{{ game.link }}" target="_blank" class="claim-btn">
-                            立即领取 →
+                        <a href="{{ game.link }}" target="_blank" class="game-link-btn">
+                            查看游戏 →
                         </a>
                     </div>
                 </div>
@@ -289,7 +289,7 @@
                             {% endif %}
                         </div>
                         
-                        <a href="{{ game.link }}" target="_blank" class="claim-btn upcoming">
+                        <a href="{{ game.link }}" target="_blank" class="game-link-btn upcoming">
                             即将推出
                         </a>
                     </div>

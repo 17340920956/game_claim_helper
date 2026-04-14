@@ -75,7 +75,7 @@ class WeChatOfficialPusher(BasePusher):
             # 使用图文消息发送，包含图片、标题、描述和链接
             articles = [{
                 "title": f"🎮 {game.get('name', '未知游戏')}",
-                "description": f"免费领取时间：\n{_local_time(game.get('start_time'))} 至 {_local_time(game.get('end_time'))}\n\n点击查看详情并领取游戏",
+                "description": f"免费时间：\n{_local_time(game.get('start_time'))} 至 {_local_time(game.get('end_time'))}\n\n点击查看游戏详情",
                 "url": game.get('link') or 'https://store.epicgames.com/zh-CN/free-games',
                 "image": game.get('image_url') or 'https://via.placeholder.com/800x400?text=Free+Game'
             }]
@@ -89,11 +89,11 @@ class WeChatOfficialPusher(BasePusher):
 
 游戏名称：{game.get('name', '未知')}
 游戏图片：{game.get('image_url') or '暂无'}
-领取链接：{game.get('link') or '暂无'}
+游戏链接：{game.get('link') or '暂无'}
 开始时间：{_local_time(game.get('start_time'))}
 结束时间：{_local_time(game.get('end_time'))}
 
-请点击链接领取游戏，或回复"领取"让我们帮您领取。"""
+请访问 Epic 官网查看游戏。"""
                 return self.send_message(contact_id, message)
             
             return result

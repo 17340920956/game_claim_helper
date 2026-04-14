@@ -40,11 +40,11 @@ class PushService:
 
 游戏名：{game.get('name', '未知')}
 图片：{game.get('image_url') or '暂无'}
-领取链接：{game.get('link') or '暂无'}
+游戏链接：{game.get('link') or '暂无'}
 开始时间：{_local_time(game.get('start_time'))}
 结束时间：{_local_time(game.get('end_time'))}
 
-请访问 Epic 官网手动领取游戏。"""
+请访问 Epic 官网查看游戏。"""
         return msg
 
     def _format_next_week_message(self, games: List[Dict[str, Any]]) -> str:

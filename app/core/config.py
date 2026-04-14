@@ -1,13 +1,9 @@
-
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     """
     全局配置聚合类
     """
-    # Database
-    DATABASE_URL: str = "mysql+pymysql://root:password@localhost:3306/game_claim_helper"
-    
     # Redis
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
@@ -25,21 +21,12 @@ class Settings(BaseSettings):
     WECHAT_OFFICIAL_TOKEN: str = ""
     WECHAT_OFFICIAL_AES_KEY: str = ""
     WECHAT_OFFICIAL_TEMPLATE_ID: str = ""
-    WECHAT_OFFICIAL_URL: str = "http://localhost:8000"  # 公众号服务器URL，用于构建网页链接
-    # WeChat Official API URLs
-    # 稳定版凭证接口
+    WECHAT_OFFICIAL_URL: str = "http://localhost:8000"
     WECHAT_OFFICIAL_STABLE_TOKEN_URL: str = "https://api.weixin.qq.com/cgi-bin/stable_token"
-    # 网络检测接口
     WECHAT_OFFICIAL_CALLBACK_CHECK_URL: str = "https://api.weixin.qq.com/cgi-bin/callback/check"
     
     # App
     SCHEDULER_TIMEZONE: str = "Asia/Shanghai"
-
-    # Security
-    SECRET_KEY: str = "change-me-to-a-secure-secret-key"
-    ADMIN_API_KEY: str = "admin-secret-key"
-    JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7
     BASE_URL: str = "http://localhost:8000"
 
     class Config:

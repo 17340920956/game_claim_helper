@@ -4,7 +4,6 @@ from typing import Optional
 from app.services.game.scraper_service import fetch_and_store_games
 from app.db.redis import redis_client
 from app.schemas.game import GameResponse, GameListResponse
-from app.core.security import verify_admin_access
 from app.core.logger import logger
 from datetime import datetime
 
@@ -65,7 +64,6 @@ async def get_all_free_games(
         if status == "upcoming":
             games = redis_client.get_next_week_games()
         else:
-            # 默认返回当前游戏
             games = redis_client.get_current_week_games()
         
         return GameListResponse(
@@ -79,7 +77,7 @@ async def get_all_free_games(
 
 @router.post("/games/refresh")
 async def refresh_free_games():
-    """手动刷新游戏数据（立即爬取最新游戏）"""
+    """手动刷新游戏数据"""
     try:
         logger.info("手动触发游戏数据刷新")
         games = fetch_and_store_games()
@@ -99,16 +97,11 @@ async def refresh_free_games():
 
 @router.get("/games/view")
 async def games_view_page(request: Request):
-    """
-    游戏展示网页 - 聚合本周免费游戏和下周预告
-    用于微信推送时展示游戏图片和详细信息
-    """
+    """游戏展示网页"""
     try:
-        # 从 Redis 获取游戏数据
         current_games = redis_client.get_current_week_games()
         upcoming_games = redis_client.get_next_week_games()
         
-        # 格式化时间显示
         def format_time(time_str):
             if not time_str:
                 return None
@@ -118,7 +111,6 @@ async def games_view_page(request: Request):
             except:
                 return time_str
         
-        # 处理游戏数据
         for game in current_games:
             game['end_time'] = format_time(game.get('end_time'))
         

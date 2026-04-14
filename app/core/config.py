@@ -1,5 +1,4 @@
 from pydantic_settings import BaseSettings
-from functools import lru_cache
 import os
 
 
@@ -41,26 +40,46 @@ class Settings(BaseSettings):
 
 
 def _parse_redis_password(redis_url: str) -> str:
-    """从 REDIS_URL 解析密码"""
-    if not redis_url or '@' not in redis_url:
+    """从 REDIS_URL 解析密码
+    
+    格式: redis://:password@host:port/db
+    密码中可能包含 @ 字符，需要正确处理
+    """
+    if not redis_url:
         return ""
+    
     try:
-        # redis://:password@host:port/db
-        # 提取 @ 之前的部分
-        auth_part = redis_url.split('@')[0]
-        # 查找 : 后面的内容作为密码
-        if ':@' in auth_part:
-            password = auth_part.split(':@')[-1]
-            return password
-        elif '://:' in auth_part:
-            password = auth_part.split('://:')[-1]
-            return password
+        # 移除协议前缀
+        if '://' in redis_url:
+            redis_url = redis_url.split('://', 1)[1]
+        
+        # 格式: :password@host:port/db
+        # 找到最后一个 @ 符号，它后面是 host:port/db
+        if '@' not in redis_url:
+            return ""
+        
+        # 从后往前找 @，因为密码中可能有 @
+        at_index = redis_url.rfind('@')
+        if at_index == -1:
+            return ""
+        
+        # @ 前面的部分是 :password
+        auth_part = redis_url[:at_index]
+        
+        # 移除开头的 :
+        if auth_part.startswith(':'):
+            password = auth_part[1:]
+        else:
+            password = auth_part
+        
+        return password
+        
     except Exception:
         pass
     return ""
 
 
-# 全局设置实例（不使用缓存，每次都重新解析）
+# 全局设置实例
 _settings = None
 
 def get_settings() -> Settings:

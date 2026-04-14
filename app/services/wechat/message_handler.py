@@ -309,3 +309,30 @@ class WeChatService:
             "• 帮助 - 显示此帮助信息\n\n"
             "提示：游戏数据每天自动更新"
         )
+
+    def generate_xml_response(self, reply_content, msg, openid: str = None) -> str:
+        """生成微信 XML 响应"""
+        from wechatpy.replies import TextReply, ArticlesReply
+        
+        if isinstance(reply_content, dict) and reply_content.get("type") == "articles":
+            # 图文消息
+            articles = reply_content.get("articles", [])
+            if articles:
+                reply = ArticlesReply(message=msg)
+                for article in articles:
+                    reply.add_article({
+                        "title": article.get("title", ""),
+                        "description": article.get("description", ""),
+                        "image": article.get("picurl", ""),
+                        "url": article.get("url", "")
+                    })
+                return reply.render()
+        
+        # 文本消息
+        if isinstance(reply_content, str):
+            reply = TextReply(message=msg, content=reply_content)
+            return reply.render()
+        
+        # 默认返回
+        reply = TextReply(message=msg, content="收到")
+        return reply.render()

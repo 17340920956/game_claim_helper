@@ -40,26 +40,38 @@ class Settings(BaseSettings):
         extra = "ignore"
 
 
-@lru_cache()
+def _parse_redis_password(redis_url: str) -> str:
+    """从 REDIS_URL 解析密码"""
+    if not redis_url or '@' not in redis_url:
+        return ""
+    try:
+        # redis://:password@host:port/db
+        # 提取 @ 之前的部分
+        auth_part = redis_url.split('@')[0]
+        # 查找 : 后面的内容作为密码
+        if ':@' in auth_part:
+            password = auth_part.split(':@')[-1]
+            return password
+        elif '://:' in auth_part:
+            password = auth_part.split('://:')[-1]
+            return password
+    except Exception:
+        pass
+    return ""
+
+
+# 全局设置实例（不使用缓存，每次都重新解析）
+_settings = None
+
 def get_settings() -> Settings:
+    global _settings
+    
+    # 每次都创建新的实例，确保环境变量被重新读取
     settings = Settings()
     
     # 从 REDIS_URL 解析密码（如果 REDIS_PASSWORD 为空）
     if not settings.REDIS_PASSWORD and settings.REDIS_URL:
-        redis_url = settings.REDIS_URL
-        # redis://:password@host:port/db
-        if '@' in redis_url:
-            try:
-                # 提取 @ 之前的部分
-                auth_part = redis_url.split('@')[0]
-                # 查找 : 后面的内容作为密码
-                if ':@' in auth_part:
-                    password = auth_part.split(':@')[-1]
-                    settings.REDIS_PASSWORD = password
-                elif '://:' in auth_part:
-                    password = auth_part.split('://:')[-1]
-                    settings.REDIS_PASSWORD = password
-            except Exception:
-                pass
+        settings.REDIS_PASSWORD = _parse_redis_password(settings.REDIS_URL)
     
+    _settings = settings
     return settings

@@ -1,13 +1,8 @@
-# Dockerfile
+# Dockerfile - 简化版
 FROM python:3.11-slim
 
 # 设置工作目录
 WORKDIR /app
-
-# 安装必要工具
-RUN apt-get update && apt-get install -y \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
 
 # 设置pip超时和重试
 ENV PIP_DEFAULT_TIMEOUT=300

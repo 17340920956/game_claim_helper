@@ -7,7 +7,14 @@ class Settings(BaseSettings):
     """
     # Database
     DATABASE_URL: str = "mysql+pymysql://root:password@localhost:3306/game_claim_helper"
-    REDIS_URL: str = "redis://localhost:6379/0"
+    
+    # Redis
+    REDIS_HOST: str = "localhost"
+    REDIS_PORT: int = 6379
+    REDIS_DB: int = 0
+    REDIS_PASSWORD: str = ""
+    REDIS_PREFIX: str = "game_claim"
+    REDIS_TTL: int = 604800  # 7天
 
     # Epic
     EPIC_FREE_GAMES_URL: str = "https://store.epicgames.com/en-US/free-games"

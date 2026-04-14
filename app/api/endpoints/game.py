@@ -5,13 +5,11 @@
 - 当前免费游戏列表
 - 即将免费游戏预告
 - 游戏数据刷新
-- 游戏展示网页
 
 数据存储：Redis
 """
 
-from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.templating import Jinja2Templates
+from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 from datetime import datetime
 
@@ -22,9 +20,6 @@ from app.core.logger import logger
 
 # 路由实例
 router = APIRouter()
-
-# 模板引擎（用于渲染网页）
-templates = Jinja2Templates(directory="app/templates")
 
 
 def _build_game_response(game_dict: dict) -> GameResponse:
@@ -177,43 +172,4 @@ async def refresh_free_games():
         }
     except Exception as e:
         logger.error(f"刷新游戏数据失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/games/view")
-async def games_view_page(request: Request):
-    """
-    游戏展示网页
-    
-    渲染一个美观的网页展示当前和即将免费的游戏
-    用于微信推送中的链接跳转
-    
-    参数：
-        request: FastAPI请求对象（模板渲染需要）
-    
-    返回：
-        HTML页面: 包含游戏列表、图片、时间信息的网页
-    
-    异常：
-        500: 渲染过程中发生错误
-    """
-    try:
-        current_games = redis_client.get_current_week_games()
-        upcoming_games = redis_client.get_next_week_games()
-
-        # 格式化时间显示
-        for game in current_games:
-            game['end_time'] = _format_time(game.get('end_time'))
-
-        for game in upcoming_games:
-            game['start_time'] = _format_time(game.get('start_time'))
-
-        return templates.TemplateResponse("games.html", {
-            "request": request,
-            "current_games": current_games,
-            "upcoming_games": upcoming_games,
-            "update_time": datetime.now().strftime('%Y年%m月%d日 %H:%M')
-        })
-    except Exception as e:
-        logger.error(f"渲染游戏展示页面失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))

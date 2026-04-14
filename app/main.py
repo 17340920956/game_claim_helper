@@ -7,29 +7,23 @@ import uvicorn
 
 from app.core.scheduler import start_scheduler
 from app.core.logger import logger
-from app.db.session import engine, Base
 from app.api.endpoints.wechat import router as wechat_router
-from app.api.endpoints.user import router as user_router
 from app.api.endpoints.game import router as game_router
-from app.api.endpoints.notification import router as notification_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
     应用生命周期管理
-    - 启动时：初始化并启动定时任务调度器
+    - 启动时：启动定时任务调度器
     - 关闭时：执行清理操作（目前为空）
     """
-    # 初始化数据库表
-    Base.metadata.create_all(bind=engine)
-    logger.info("Database tables initialized.")
-    
     start_scheduler()
+    logger.info("Scheduler started.")
     yield
 
 app = FastAPI(
     title="Epic免费游戏推送系统",
-    description="自动爬取Epic免费游戏并推送到微信公众号/QQ",
+    description="自动爬取Epic免费游戏并推送到微信公众号",
     version="1.0.0",
     lifespan=lifespan
 )
@@ -43,11 +37,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 注册路由模块 - 注意顺序，game_router 包含 /games/view 要在通配路由之前
+# 注册路由模块
 app.include_router(wechat_router)
-app.include_router(user_router)
 app.include_router(game_router)
-app.include_router(notification_router)
 
 @app.get("/health")
 def health_check():
@@ -73,4 +65,3 @@ async def serve_wechat_verify_file(filename: str):
 if __name__ == "__main__":
     logger.info("Starting server...")
     uvicorn.run(app, host="0.0.0.0", port=8000)
-    

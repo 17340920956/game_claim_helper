@@ -14,91 +14,79 @@ REMOTE_PATH = "/opt/docker/python/game_claim_helper"
 def create_ssh_client():
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(HOST, username=USER, password=PASSWORD, timeout=30)
+    client.connect(HOST, username=USER, password=PASSWORD, timeout=60)
     return client
 
-def run_command(client, cmd, description="", timeout=120):
-    if description:
-        print(f"\n>>> {description}")
-    print(f"执行: {cmd[:80]}...")
+def run_command(client, cmd, timeout=300):
     stdin, stdout, stderr = client.exec_command(cmd, get_pty=True, timeout=timeout)
     stdin.write(PASSWORD + '\n')
     stdin.flush()
-    output = stdout.read().decode()
-    error = stderr.read().decode()
-    if output:
-        lines = output.split('\n')
-        filtered = [l for l in lines if PASSWORD not in l]
-        if filtered:
-            print('\n'.join(filtered[-50:]))
-    if error and 'WARNING' not in error:
-        print(f"错误: {error[:500]}", file=sys.stderr)
-    return output, error
+    output = stdout.read().decode('utf-8', errors='ignore')
+    return output
 
 def main():
-    print("=== 重新构建镜像并部署 ===")
-    
-    client = create_ssh_client()
-    
+    client = None
     try:
-        # 1. 停止并删除旧容器
-        print("\n1. 停止并删除旧容器...")
-        run_command(client, f"echo '{PASSWORD}' | sudo -S docker stop game_claim_helper 2>/dev/null || true", "停止容器")
-        run_command(client, f"echo '{PASSWORD}' | sudo -S docker rm game_claim_helper 2>/dev/null || true", "删除容器")
+        client = create_ssh_client()
         
-        # 2. 删除旧镜像
-        print("\n2. 删除旧镜像...")
-        run_command(client, f"echo '{PASSWORD}' | sudo -S docker rmi game_claim_helper-app:latest 2>/dev/null || true", "删除镜像")
+        print("=== 重新构建并部署 ===\n")
         
-        # 3. 重新构建镜像（不使用缓存）
-        print("\n3. 重新构建镜像（约需5-10分钟）...")
-        build_cmd = f"cd {REMOTE_PATH} && docker build --no-cache -t game_claim_helper-app:latest ."
-        stdin, stdout, stderr = client.exec_command(f"echo '{PASSWORD}' | sudo -S bash -c '{build_cmd}'", get_pty=True, timeout=600)
-        stdin.write(PASSWORD + '\n')
-        stdin.flush()
+        # 1. 上传代码包
+        print("1. 上传代码包...")
+        sftp = client.open_sftp()
+        sftp.put('/tmp/game_claim_helper.tar.gz', '/tmp/game_claim_helper.tar.gz')
+        sftp.close()
+        print("上传完成!")
         
-        # 实时读取输出
-        while not stdout.channel.exit_status_ready():
-            if stdout.channel.recv_ready():
-                line = stdout.channel.recv(1024).decode()
-                if PASSWORD not in line:
-                    print(line, end='')
+        # 2. 停止并删除旧容器
+        print("\n2. 停止并删除旧容器...")
+        run_command(client, "sudo docker stop game_claim_helper 2>/dev/null || true", 60)
+        run_command(client, "sudo docker rm game_claim_helper 2>/dev/null || true", 60)
+        print("旧容器已删除")
         
-        remaining = stdout.read().decode()
-        if remaining and PASSWORD not in remaining:
-            print(remaining)
+        # 3. 删除旧镜像
+        print("\n3. 删除旧镜像...")
+        run_command(client, "sudo docker rmi game_claim_helper:latest 2>/dev/null || true", 60)
+        print("旧镜像已删除")
         
-        exit_code = stdout.channel.recv_exit_status()
-        if exit_code != 0:
-            print(f"构建失败，退出码: {exit_code}")
-            return
+        # 4. 解压代码
+        print("\n4. 解压代码...")
+        run_command(client, f"cd {REMOTE_PATH} && sudo tar xzf /tmp/game_claim_helper.tar.gz --overwrite", 60)
+        print("解压完成!")
         
-        print("\n镜像构建成功!")
+        # 5. 构建新镜像
+        print("\n5. 构建新镜像（这可能需要10-15分钟）...")
+        output = run_command(client, f"cd {REMOTE_PATH} && sudo docker build -t game_claim_helper:latest .", 900)
+        print(output[-2000:] if len(output) > 2000 else output)
         
-        # 4. 启动容器
-        print("\n4. 启动容器...")
-        run_command(
-            client,
-            f"echo '{PASSWORD}' | sudo -S docker run -d --name game_claim_helper --network host --env-file {REMOTE_PATH}/.env -v /var/log/game_claim_helper:/app/logs -v /tmp:/tmp --restart unless-stopped game_claim_helper-app:latest",
-            "启动容器",
-            timeout=30
-        )
+        # 6. 启动新容器
+        print("\n6. 启动新容器...")
+        output = run_command(client, f"sudo docker run -d --name game_claim_helper --network host --env-file {REMOTE_PATH}/.env -v /var/log/game_claim_helper:/app/logs -v /tmp:/tmp --restart unless-stopped game_claim_helper:latest", 60)
+        print(output)
         
-        # 5. 等待并测试
-        print("\n5. 等待容器启动...")
-        time.sleep(5)
+        # 7. 等待并检查状态
+        print("\n7. 等待容器启动...")
+        time.sleep(10)
         
-        print("\n6. 测试网页访问...")
-        run_command(client, f"echo '{PASSWORD}' | sudo -S curl -s http://localhost:8000/games/view 2>&1 | head -30", "测试网页")
+        print("\n8. 检查容器状态...")
+        output = run_command(client, "sudo docker ps | grep game_claim_helper", 30)
+        print(output)
+        
+        # 8. 查看日志
+        print("\n9. 查看最新日志...")
+        output = run_command(client, "sudo docker logs --tail 30 game_claim_helper 2>&1", 30)
+        print(output)
         
         print("\n=== 部署完成 ===")
+        print("访问地址: https://yxbot.online/wechat/callback")
         
     except Exception as e:
         print(f"\n部署失败: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
     finally:
-        client.close()
+        if client:
+            client.close()
 
 if __name__ == "__main__":
     main()

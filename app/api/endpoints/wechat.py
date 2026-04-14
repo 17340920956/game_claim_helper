@@ -1,9 +1,7 @@
 from fastapi import APIRouter, Query, Request, Depends, Response, HTTPException
 from fastapi.responses import PlainTextResponse, JSONResponse
-from sqlalchemy.orm import Session
 import os
 import hashlib
-from app.db.session import get_db
 from app.security.wechat.wechat_security import WeChatSecurity
 from app.services.wechat.message_handler import WeChatService
 from wechatpy import parse_message
@@ -105,8 +103,7 @@ async def wechat_callback(
     nonce: str = Query(...),
     openid: str = Query(...),
     encrypt_type: str = Query(None),
-    msg_signature: str = Query(None),
-    db: Session = Depends(get_db)
+    msg_signature: str = Query(None)
 ):
     """
     处理微信公众号消息回调 (POST)
@@ -152,7 +149,7 @@ async def wechat_callback(
 
         # 4. Process Business Logic (Service Layer)
         logger.info("步骤4: 处理业务逻辑")
-        service = WeChatService(db)
+        service = WeChatService()
         reply_content = service.process_message(msg, openid)
         logger.info(f"步骤4: 业务处理完成，回复内容类型: {type(reply_content).__name__}")
         

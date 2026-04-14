@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
-from pydantic import field_validator
+from functools import lru_cache
+
 
 class Settings(BaseSettings):
     """
@@ -37,26 +38,34 @@ class Settings(BaseSettings):
         env_file = ".env"
         extra = "ignore"
 
-    @field_validator('REDIS_PASSWORD', mode='before')
-    @classmethod
-    def parse_redis_url(cls, v, info):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # 从 REDIS_URL 解析密码
+        if not self.REDIS_PASSWORD and self.REDIS_URL:
+            self.REDIS_PASSWORD = self._parse_redis_password(self.REDIS_URL)
+    
+    @staticmethod
+    def _parse_redis_password(redis_url: str) -> str:
         """从 REDIS_URL 解析密码"""
-        if v:
-            return v
-        redis_url = info.data.get('REDIS_URL', '')
-        if redis_url and '@' in redis_url:
+        if not redis_url or '@' not in redis_url:
+            return ""
+        try:
             # redis://:password@host:port/db
-            try:
-                # 提取密码部分
-                auth_part = redis_url.split('@')[0]
-                if ':@' in auth_part:
-                    password = auth_part.split(':@')[-1]
-                    return password
-            except:
-                pass
-        return v
+            # 提取 @ 之前的部分
+            auth_part = redis_url.split('@')[0]
+            # 查找最后一个 : 后面的内容作为密码
+            if ':@' in auth_part:
+                # 格式: redis://:password@host
+                password = auth_part.split(':@')[-1]
+                return password
+            elif '://:' in auth_part:
+                # 格式: redis://:password
+                password = auth_part.split('://:')[-1]
+                return password
+        except Exception:
+            pass
+        return ""
 
-from functools import lru_cache
 
 @lru_cache()
 def get_settings() -> Settings:

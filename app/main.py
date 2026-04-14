@@ -10,8 +10,9 @@ from app.core.logger import logger
 from app.api.endpoints.wechat import router as wechat_router
 from app.api.endpoints.game import router as game_router
 
+
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI):
     """
     应用生命周期管理
     - 启动时：启动定时任务调度器
@@ -20,6 +21,7 @@ async def lifespan(app: FastAPI):
     start_scheduler()
     logger.info("Scheduler started.")
     yield
+
 
 app = FastAPI(
     title="Epic免费游戏推送系统",
@@ -41,6 +43,7 @@ app.add_middleware(
 app.include_router(wechat_router)
 app.include_router(game_router)
 
+
 @app.get("/health")
 def health_check():
     """
@@ -48,6 +51,7 @@ def health_check():
     """
     from datetime import datetime
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+
 
 @app.get("/MP_verify_{filename}.txt")
 async def serve_wechat_verify_file(filename: str):
@@ -57,10 +61,11 @@ async def serve_wechat_verify_file(filename: str):
     """
     file_path = f"MP_verify_{filename}.txt"
     if os.path.exists(file_path):
-         with open(file_path, 'r') as f:
-             content = f.read()
-         return PlainTextResponse(content)
+        with open(file_path, "r") as f:
+            content = f.read()
+        return PlainTextResponse(content)
     raise HTTPException(status_code=404, detail="Not Found")
+
 
 if __name__ == "__main__":
     logger.info("Starting server...")

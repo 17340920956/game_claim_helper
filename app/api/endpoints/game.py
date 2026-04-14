@@ -1,15 +1,14 @@
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.templating import Jinja2Templates
 from typing import Optional
+from datetime import datetime
+
 from app.services.game.scraper_service import fetch_and_store_games
 from app.db.redis import redis_client
 from app.schemas.game import GameResponse, GameListResponse
 from app.core.logger import logger
-from datetime import datetime
 
 router = APIRouter()
-
-# 设置模板目录
 templates = Jinja2Templates(directory="app/templates")
 
 
@@ -25,6 +24,17 @@ def _build_game_response(game_dict: dict) -> GameResponse:
         namespace=game_dict.get('namespace'),
         note=game_dict.get('note')
     )
+
+
+def _format_time(time_str: Optional[str]) -> Optional[str]:
+    """格式化时间字符串"""
+    if not time_str:
+        return None
+    try:
+        dt = datetime.fromisoformat(time_str.replace('Z', '+00:00'))
+        return dt.strftime('%m月%d日 %H:%M')
+    except:
+        return time_str
 
 
 @router.get("/games/current", response_model=GameListResponse)
@@ -61,11 +71,7 @@ async def get_all_free_games(
 ):
     """获取所有游戏列表（支持状态筛选）"""
     try:
-        if status == "upcoming":
-            games = redis_client.get_next_week_games()
-        else:
-            games = redis_client.get_current_week_games()
-        
+        games = redis_client.get_next_week_games() if status == "upcoming" else redis_client.get_current_week_games()
         return GameListResponse(
             total=len(games),
             games=[_build_game_response(g) for g in games]
@@ -101,22 +107,13 @@ async def games_view_page(request: Request):
     try:
         current_games = redis_client.get_current_week_games()
         upcoming_games = redis_client.get_next_week_games()
-        
-        def format_time(time_str):
-            if not time_str:
-                return None
-            try:
-                dt = datetime.fromisoformat(time_str.replace('Z', '+00:00'))
-                return dt.strftime('%m月%d日 %H:%M')
-            except:
-                return time_str
-        
+
         for game in current_games:
-            game['end_time'] = format_time(game.get('end_time'))
-        
+            game['end_time'] = _format_time(game.get('end_time'))
+
         for game in upcoming_games:
-            game['start_time'] = format_time(game.get('start_time'))
-        
+            game['start_time'] = _format_time(game.get('start_time'))
+
         return templates.TemplateResponse("games.html", {
             "request": request,
             "current_games": current_games,
